@@ -1,3 +1,11 @@
+# Miqui · Equipo 17 · HaCAithon 2026
+
+### 🚌 **App en vivo: https://d6bg0tya67l5a.cloudfront.net**
+
+*Seguimiento en vivo de micros rurales. Salta a la [guía del proyecto](#miqui--seguimiento-en-vivo-de-micros-rurales) o a la [documentación completa](DOCUMENTACION.md).*
+
+---
+
 # HaCAiThon 2026 · RESUMEN BASES OFICIALES
 
 <p align="left">
@@ -118,7 +126,41 @@ Consultas: cai@caiuc.cl
 ---
 ---
 
-# PROYECTO · Guía de desarrollo
+# Miqui · seguimiento en vivo de micros rurales
+
+## 🚌 App en vivo: **https://d6bg0tya67l5a.cloudfront.net**
+
+En zonas rurales de Chile nadie sabe si la micro ya pasó. Miqui responde una
+sola pregunta, bien: **¿viene o no viene?** — y nunca muestra una posición sin
+declarar qué tan vieja es.
+
+Ahora mismo hay **8 empresas reales** con 63 recorridos y 855 paraderos, y micros
+circulando **por calles reales** que puedes ver moverse en el mapa.
+
+### Las cinco vistas
+
+| Vista | Enlace | Cómo entrar |
+| --- | --- | --- |
+| **Mapa del pasajero** | [`/app`](https://d6bg0tya67l5a.cloudfront.net/app) | **Sin cuenta** — alguien apurado en un paradero no debería registrarse |
+| Landing | [`/`](https://d6bg0tya67l5a.cloudfront.net/) | — |
+| Accesos | [`/dashboard`](https://d6bg0tya67l5a.cloudfront.net/dashboard) | — |
+| Panel de empresa | [`/empresa`](https://d6bg0tya67l5a.cloudfront.net/empresa) | `admin@bupesa.cl` · `demo1234` |
+| Vista de conductor | [`/chofer`](https://d6bg0tya67l5a.cloudfront.net/chofer) | `chofer6@bupesa.cl` · `demo1234` |
+
+> ⚠️ Para la vista de conductor usa **`chofer5` o `chofer6`** de cualquier
+> empresa. Las cuentas `chofer1` a `chofer4` las ocupa el simulador de la demo y
+> te cerraría el turno a los pocos segundos.
+
+Hay una cuenta de admin por empresa (`admin@<slug>.cl`) para los ocho slugs:
+`bupesa`, `talagante`, `islaval`, `damir`, `cobrexpress`, `paine`, `munibus`,
+`colina`. Más `superadmin@demo.cl` y `pasajero@demo.cl`. La clave es `demo1234`
+en todas.
+
+**Documentación completa del proyecto: [DOCUMENTACION.md](DOCUMENTACION.md)**
+
+---
+
+## Guía de desarrollo
 
 Monorepo con **pnpm workspaces**: API en Express + Prisma, front en React + Vite, e infraestructura AWS en Terraform.
 
