@@ -1,22 +1,33 @@
 # Infraestructura AWS
 
-Terraform que levanta el proyecto completo:
+> **Ya esta desplegada.** URLs, credenciales de demo, diagramas y como borrarla:
+> [`../infra.md`](../infra.md).
+
+Terraform que levanta el proyecto completo. CloudFront es la unica puerta de entrada y
+reparte segun la ruta:
 
 ```
-Internet ──> CloudFront ──> S3 (frontend estatico)
-        └──> ALB ──> ECS Fargate (API Express) ──> RDS Postgres
-                          ↑
-                        ECR (imagen del API)
+                       ┌── default ──> S3 (bundle de Vite)
+Internet ──> CloudFront ┤
+              (HTTPS)   └── /api/*  ──> ALB ──> ECS Fargate (Express) ──> RDS Postgres
+                                                      ↑
+                                                    ECR (imagen del API)
 ```
 
-| Recurso           | Para que sirve                                                        |
-| ----------------- | --------------------------------------------------------------------- |
-| VPC + 2 AZ        | Red propia, subredes publicas (ALB/ECS) y privadas (RDS)              |
-| ECR               | Registro de la imagen Docker del API                                  |
-| ECS Fargate + ALB | Corre el API sin gestionar servidores, con health check `/api/health` |
-| RDS Postgres 16   | Base de datos, no accesible desde internet                            |
-| Secrets Manager   | Guarda la `DATABASE_URL`; ECS la inyecta en la tarea                  |
-| S3 + CloudFront   | Sirve el build de Vite por HTTPS con routing SPA                      |
+Que el API viva bajo el mismo dominio que el front no es un detalle: es lo que le da HTTPS
+sin dominio propio ni certificado ACM (el navegador bloquearia una pagina HTTPS llamando a
+un ALB por HTTP), y de paso deja las llamadas como mismo-origen, asi que **CORS no interviene
+en produccion**.
+
+| Recurso            | Para que sirve                                                        |
+| ------------------ | --------------------------------------------------------------------- |
+| VPC + 2 AZ         | Red propia, subredes publicas (ALB/ECS) y privadas (RDS)              |
+| ECR                | Registro de la imagen Docker del API                                  |
+| ECS Fargate + ALB  | Corre el API sin gestionar servidores, con health check `/api/health` |
+| RDS Postgres 16    | Base de datos, no accesible desde internet                            |
+| Secrets Manager    | `DATABASE_URL` y `JWT_SECRET`; ECS los inyecta en la tarea            |
+| S3 + CloudFront    | Sirve el build de Vite por HTTPS y enruta `/api/*` al ALB             |
+| CloudFront Function | Routing del SPA (ver mas abajo por que no se usan error responses)   |
 
 ## Requisitos
 
@@ -36,19 +47,25 @@ terraform apply           # ~10-15 min, casi todo es RDS y CloudFront
 # 1) Imagen del API -> ECR -> ECS
 ../scripts/deploy-api.sh
 
-# 2) Front -> S3 -> CloudFront (usa el ALB como VITE_API_URL)
+# 2) Front -> S3 -> CloudFront (VITE_API_URL vacio: /api es mismo-origen)
 ../scripts/deploy-web.sh
+
+# La URL para el equipo de frontend:
+terraform output -raw public_api_url
 ```
 
-Las migraciones de Prisma se aplican solas: el contenedor corre `prisma migrate deploy`
-en el arranque (`apps/api/docker-entrypoint.sh`).
+Ambos scripts son repetibles y leen todo de `terraform output`: no hay ninguna URL ni ARN
+escrito a mano. Cada vez que aterrice un cambio del backend, `deploy-api.sh` lo publica en
+~2 minutos con un rolling deploy sin caida.
 
-Tras el primer `apply`, copia la URL de CloudFront a `cors_origin` en
-`terraform.tfvars` y vuelve a aplicar para cerrar CORS:
+Las migraciones de Prisma y el seed se aplican solos en el arranque del contenedor
+(`apps/api/docker-entrypoint.sh`): `prisma migrate deploy` y, si `seed_demo_data = true`,
+`node dist/seed.js`. El seed es idempotente, asi que correrlo en cada despliegue no duplica
+nada; para apagarlo antes de la presentacion, `-var="seed_demo_data=false"`.
 
-```bash
-terraform apply -var="cors_origin=$(terraform output -raw web_url)"
-```
+**No hace falta un segundo apply para CORS.** El front llama a `/api` relativo a traves de
+CloudFront, asi que en produccion es mismo-origen y CORS no participa. `cors_origin` existe
+solo para levantar Vite en `localhost:5173` contra esta API, y ya viene con ese valor.
 
 ## Costos
 
@@ -73,15 +90,32 @@ acepta trafico del ALB, y RDS sigue en subredes privadas.
 cd infra/terraform && terraform destroy
 ```
 
-El bucket y el repositorio ECR tienen `force_destroy`/`force_delete`, y RDS
-`skip_final_snapshot`, asi que `destroy` no se queda a medias.
+El bucket y el repositorio ECR tienen `force_destroy`/`force_delete`, RDS
+`skip_final_snapshot` y los secretos `recovery_window_in_days = 0`, asi que `destroy` no
+se queda a medias ni deja secretos en cuarentena.
+
+Todos los recursos llevan el prefijo `hackathon-equipo17-demo` y los tags
+`Hackathon=haCAIthon-2026`, `Team=equipo-17`, `Temporary=true` y `DeleteAfter`. Para
+comprobar que no quedo nada corriendo:
+
+```bash
+aws resourcegroupstaggingapi get-resources \
+  --tag-filters Key=Hackathon,Values=haCAIthon-2026 \
+  --region us-east-1 --query 'ResourceTagMappingList[].ResourceARN'
+```
 
 ## Notas
 
-- El state es local. Para compartirlo, descomenta el backend S3 en `versions.tf`.
-- El ALB va por HTTP. Para HTTPS hace falta un dominio y un certificado ACM
-  (`aws_acm_certificate` + listener 443).
-- El servicio ECS ignora cambios en `task_definition` (`lifecycle.ignore_changes`)
-  porque `deploy-api.sh` redespliega con `force-new-deployment` sobre el mismo tag.
-  Si cambias CPU, memoria o variables de entorno en Terraform, corre `apply` y luego
-  `deploy-api.sh` para que el servicio tome la revision nueva.
+- El state es local. Si se pierde, el `destroy` hay que hacerlo a mano por consola. Para
+  compartirlo, descomenta el backend S3 en `versions.tf`.
+- El ALB va por HTTP, pero eso no llega al navegador: CloudFront termina el TLS y habla
+  HTTP con el ALB dentro de AWS. Un dominio propio + certificado ACM solo hace falta si se
+  quiere una URL bonita.
+- **El SPA no usa `custom_error_response`, sino la CloudFront Function `spa-rewrite`.** Los
+  error responses son de toda la distribucion: convertirian tambien los `403` de
+  `requireRole` y los `404` de `notFound` en `index.html` con status `200`, y el frontend
+  recibiria HTML donde espera JSON. La funcion solo esta asociada al behavior del S3.
+- El servicio ECS ignora cambios en `task_definition` (`lifecycle.ignore_changes`) para no
+  pelear con `deploy-api.sh`. Por eso el script resuelve explicitamente la ultima revision
+  y se la pasa a `update-service`: si cambias CPU, memoria o variables de entorno en
+  Terraform, corre `apply` y despues `deploy-api.sh` para que el servicio la tome.

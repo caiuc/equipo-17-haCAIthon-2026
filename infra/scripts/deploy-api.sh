@@ -28,14 +28,26 @@ docker build \
 echo "==> Push"
 docker push "$ECR_URL:$TAG"
 
+# El servicio tiene `ignore_changes = [task_definition]`, asi que Terraform crea revisiones
+# nuevas pero nunca mueve el servicio a ellas. Sin esto, cambiar CPU, memoria o una variable
+# de entorno en Terraform aplicaria sin efecto: el servicio seguiria en la revision vieja.
+TASK_DEF="$(aws ecs describe-task-definition \
+  --task-definition "$(basename "$SERVICE")" \
+  --region "$REGION" \
+  --query 'taskDefinition.taskDefinitionArn' \
+  --output text)"
+
 echo "==> Redesplegando el servicio ECS ($CLUSTER/$SERVICE)"
+echo "    Task definition: ${TASK_DEF##*/}"
 aws ecs update-service \
   --cluster "$CLUSTER" \
   --service "$SERVICE" \
+  --task-definition "$TASK_DEF" \
   --force-new-deployment \
   --region "$REGION" \
   --no-cli-pager \
   --query 'service.deployments[0].{status:status,desired:desiredCount}'
 
-echo "==> Listo. API: $(tf_out api_url)"
-echo "    Logs: aws logs tail /ecs/\$(basename $SERVICE) --follow"
+echo "==> Listo."
+echo "    API publica: $(tf_out public_api_url)"
+echo "    Logs:        aws logs tail /ecs/$SERVICE --follow --region $REGION"
