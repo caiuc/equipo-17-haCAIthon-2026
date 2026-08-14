@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { PulseDot } from "./PulseDot"
 
@@ -34,10 +35,10 @@ export function Hero() {
 
           <div className="mt-9 flex flex-wrap items-center gap-4">
             <Button
-              render={<a href="#como-funciona" />}
+              render={<Link to="/app" />}
               className="h-12 rounded-full bg-[var(--accent)] px-6 text-[15px] font-medium text-white transition-transform duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--accent-deep)] active:translate-y-0"
             >
-              Ver cómo funciona
+              Ver demo
             </Button>
             <a
               href="#problema"
