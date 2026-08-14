@@ -46,3 +46,7 @@ terraform.tfvars
 !terraform.tfvars.example
 # .terraform.lock.hcl SI se versiona: fija las versiones de los providers
 # para que todo el equipo aplique lo mismo.
+
+# Cache de Python del generador de sprites
+__pycache__/
+*.pyc
