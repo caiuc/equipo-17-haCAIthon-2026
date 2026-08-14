@@ -1,0 +1,1561 @@
+openapi: 3.1.0
+
+info:
+  title: Rural Transit Tracker API
+  version: 0.1.0
+  description: |
+    API de seguimiento en vivo de micros rurales (equipo 17, HaCAIthon 2026).
+
+    ## Principio rector
+
+    **Nunca se entrega informacion sin declarar que tan vieja es.** Toda posicion
+    que devuelve esta API viaja con `recordedAt`, `ageSeconds` y `freshness`, y
+    `distanceMeters` es `null` cuando la frescura es `NO_SIGNAL`. Una distancia
+    calculada sobre una posicion de hace cuatro minutos genera confianza falsa y
+    hace que alguien pierda la micro; por eso se prefiere no responder.
+
+    El frontend debe mostrar siempre el estado de frescura junto a la posicion.
+
+    ## Sin WebSockets
+
+    El chofer hace `POST` de su posicion cada ~4s y el pasajero consulta
+    `GET /routes/{id}/live` cada ~5s. En zona rural la senal se corta, y un POST
+    que falla se reintenta solo en el siguiente ping, sin manejar reconexion.
+
+    Los intervalos exactos viven en `@equipo17/shared/constants` para que front y
+    back no puedan divergir: `DRIVER_PING_INTERVAL_MS`, `LIVE_POLL_INTERVAL_MS`,
+    `FRESHNESS_LIVE_MS`, `FRESHNESS_INTERMITTENT_MS`, `OCCUPANCY_FULL_THRESHOLD`.
+
+    ## Coordenadas
+
+    Las lecturas usan `{ lat, lng }`, que es exactamente `google.maps.LatLngLiteral`:
+    el objeto se le pasa directo a un marcador sin conversion. Solo la INGESTA del
+    chofer usa `latitude`/`longitude`, porque es lo que entrega la Geolocation API
+    del navegador tal cual.
+
+    ## Credenciales de demo
+
+    Todas con clave `demo1234`: `superadmin@demo.cl`, `admin@bupesa.cl`,
+    `chofer1@bupesa.cl` (y 2, 3), `pasajero@demo.cl`.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000/api
+    description: Desarrollo local
+  - url: https://{cloudfrontDomain}/api
+    description: Despliegue en AWS (mismo origen que el frontend, sin CORS)
+    variables:
+      cloudfrontDomain:
+        default: dxxxxxxxxxxxxx.cloudfront.net
+
+tags:
+  - name: Publico
+    description: 'Sin token. Es el caso de uso real: alguien parado en un paradero.'
+  - name: Auth
+    description: Registro y sesion.
+  - name: Chofer
+    description: Turnos y transmision de posicion. Requiere rol DRIVER.
+  - name: Empresa
+    description: Panel de la empresa. Requiere rol COMPANY_ADMIN.
+  - name: Superadmin
+    description: Gestion de empresas. Requiere rol SUPERADMIN.
+
+security: []
+
+paths:
+  /health:
+    get:
+      tags: [Publico]
+      summary: Estado del servicio
+      description: Incluye un `SELECT 1` contra Postgres. Es el health check del ALB.
+      responses:
+        '200':
+          description: Servicio y base operativos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: La base no responde
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /openapi.yaml:
+    get:
+      tags: [Publico]
+      summary: Este mismo contrato
+      description: |
+        Sirve el spec para poder apuntar Swagger, Postman o un generador de
+        cliente al servidor sin clonar el repo.
+      responses:
+        '200':
+          description: El contrato en YAML
+          content:
+            text/yaml:
+              schema: { type: string }
+
+  /routes:
+    get:
+      tags: [Publico]
+      summary: Buscar recorridos
+      description: |
+        Busca por nombre o codigo, sin distinguir mayusculas. Sin `q` devuelve el
+        catalogo completo. Solo recorridos activos de empresas activas.
+
+        Sin resultados devuelve `[]` con 200, nunca 404.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 120 }
+          example: vicuna
+      responses:
+        '200':
+          description: Recorridos encontrados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RouteSummary' }
+
+  /routes/{id}:
+    get:
+      tags: [Publico]
+      summary: Detalle de un recorrido
+      description: Paraderos ordenados por `stopOrder` y horarios por tipo de dia.
+      parameters:
+        - $ref: '#/components/parameters/RouteId'
+      responses:
+        '200':
+          description: Detalle del recorrido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /routes/{id}/live:
+    get:
+      tags: [Publico]
+      summary: Micros en ruta ahora
+      description: |
+        **El endpoint principal del pasajero.** Consultar cada `LIVE_POLL_INTERVAL_MS`
+        (5s). Responde `Cache-Control: no-store`.
+
+        Puede haber varias micros en el mismo recorrido a la vez, por eso `buses`
+        es una lista. Vienen ordenadas por cercania al paradero consultado.
+
+        Usar `serverTime` para calcular antiguedades en el cliente: un celular con
+        el reloj desajustado no debe corromper la frescura que se muestra.
+      parameters:
+        - $ref: '#/components/parameters/RouteId'
+        - name: stopId
+          in: query
+          required: false
+          description: |
+            Paradero al que se quiere saber la distancia. Debe pertenecer al
+            recorrido. Sin este parametro, `distanceMeters` es `null` en todas
+            las micros.
+          schema: { type: string }
+      responses:
+        '200':
+          description: |
+            Estado en vivo. Si `outOfService` es `true`, el frontend debe mostrar
+            explicitamente "No hay micros en ruta" — responde directo al
+            "¿viene o no viene?" del problema.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveRoute' }
+              examples:
+                enVivo:
+                  summary: Una micro transmitiendo
+                  value:
+                    routeId: cmst8oyjh000eijaoisgx5yzi
+                    routeName: Vicuna Corriente
+                    serverTime: '2026-08-14T17:49:09.549Z'
+                    stopId: cmst8oyjl000mijaolxol3qyv
+                    outOfService: false
+                    buses:
+                      - tripId: cmst8phf70001ijiow2zzn966
+                        routeId: cmst8oyjh000eijaoisgx5yzi
+                        driverName: Luis Farias
+                        position: { lat: -33.6091, lng: -70.8739 }
+                        speed: 60
+                        heading: 70
+                        recordedAt: '2026-08-14T17:49:09.259Z'
+                        ageSeconds: 0
+                        freshness: LIVE
+                        distanceMeters: 25231
+                        occupancy:
+                          { status: UNKNOWN, source: null, reportCount: 0, updatedAt: null }
+                sinSenal:
+                  summary: Micro que dejo de transmitir (distanceMeters en null)
+                  value:
+                    routeId: cmst8oyjh000eijaoisgx5yzi
+                    routeName: Vicuna Corriente
+                    serverTime: '2026-08-14T17:52:00.000Z'
+                    stopId: cmst8oyjl000mijaolxol3qyv
+                    outOfService: false
+                    buses:
+                      - tripId: cmst8phhx0003ijiovykjp6ea
+                        routeId: cmst8oyjh000eijaoisgx5yzi
+                        driverName: Ana Rojas
+                        position: { lat: -33.6055, lng: -70.862 }
+                        speed: null
+                        heading: null
+                        recordedAt: '2026-08-14T17:49:46.000Z'
+                        ageSeconds: 134
+                        freshness: NO_SIGNAL
+                        distanceMeters: null
+                        occupancy:
+                          { status: UNKNOWN, source: null, reportCount: 0, updatedAt: null }
+                fueraDeServicio:
+                  summary: Ninguna micro en ruta
+                  value:
+                    routeId: cmst8oyjh000eijaoisgx5yzi
+                    routeName: Vicuna Corriente
+                    serverTime: '2026-08-14T17:47:31.858Z'
+                    stopId: null
+                    buses: []
+                    outOfService: true
+        '400':
+          description: El `stopId` no existe o pertenece a otro recorrido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /trips/{id}/occupancy:
+    post:
+      tags: [Publico]
+      summary: Reportar si la micro va llena
+      description: |
+        Reporte colaborativo, **sin necesidad de cuenta**.
+
+        Cada persona tiene un voto que puede cambiar: enviar `full: false` despues
+        de un `full: true` corrige el anterior, no suma otro. La identidad sale del
+        token si hay sesion, y si no del header `x-device-id`; el frontend debe
+        generar un uuid, guardarlo en `localStorage` y mandarlo siempre.
+
+        Con `OCCUPANCY_FULL_THRESHOLD` (3) votos netos la micro pasa a `FULL`.
+        **El reporte del chofer manda sobre el de los pasajeros.**
+
+        Limite: 20 reportes por minuto por IP.
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+        - name: x-device-id
+          in: header
+          required: false
+          description: Obligatorio si no se envia token. uuid estable por dispositivo.
+          schema: { type: string }
+          example: 6f1c2b7e-9f3a-4a1e-8c2d-0b5a7e4f1d33
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportOccupancy' }
+      responses:
+        '200':
+          description: Estado de ocupacion resuelto tras el voto
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [occupancy]
+                properties:
+                  occupancy: { $ref: '#/components/schemas/Occupancy' }
+        '400':
+          description: Falta el header `x-device-id` y no hay token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El turno ya no esta en curso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Registrar un pasajero
+      description: |
+        Solo crea cuentas de pasajero: el rol se fuerza en el servidor y no se lee
+        del body. Los choferes los crea su empresa y los admin de empresa el superadmin.
+
+        Limite: 30 intentos cada 15 minutos por IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterInput' }
+      responses:
+        '201':
+          description: Cuenta creada y sesion iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: El email ya esta registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesion
+      description: |
+        Sirve para los cuatro roles. Un email inexistente y una clave incorrecta
+        devuelven exactamente la misma respuesta, para que no se pueda averiguar
+        que cuentas existen.
+
+        Limite: 30 intentos cada 15 minutos por IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginInput' }
+      responses:
+        '200':
+          description: Sesion iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          description: Credenciales invalidas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: La empresa de la cuenta esta suspendida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Usuario de la sesion actual
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Datos del usuario
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicUser' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /driver/routes:
+    get:
+      tags: [Chofer]
+      summary: Recorridos que el chofer puede tomar
+      description: Recorridos activos de su empresa. Es la lista de "iniciar turno".
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Recorridos disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routes]
+                properties:
+                  routes:
+                    type: array
+                    items: { $ref: '#/components/schemas/DriverRoute' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /driver/trips/active:
+    get:
+      tags: [Chofer]
+      summary: Turno en curso del chofer
+      description: 'Devuelve `trip: null` si no tiene ninguno abierto.'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Turno activo o null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trip]
+                properties:
+                  trip:
+                    oneOf:
+                      - { $ref: '#/components/schemas/Trip' }
+                      - { type: 'null' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /driver/trips/start:
+    post:
+      tags: [Chofer]
+      summary: Iniciar turno
+      description: |
+        Crea el turno al vuelo, sin agenda previa. Un chofer va en una micro a la
+        vez: si ya tiene un turno en curso responde 409 con ese turno en
+        `error.details.trip`, para que la app lo retome en vez de fallar.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [routeId]
+              properties:
+                routeId: { type: string }
+      responses:
+        '201':
+          description: Turno iniciado
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trip]
+                properties:
+                  trip: { $ref: '#/components/schemas/Trip' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: El recorrido no existe o no es de su empresa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Ya tiene un turno en curso (viene en `error.details.trip`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /driver/trips/{id}/end:
+    post:
+      tags: [Chofer]
+      summary: Finalizar turno
+      description: |
+        Deja de transmitir y la micro desaparece de la vista del pasajero de
+        inmediato. Solo sobre el turno propio.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      responses:
+        '200':
+          description: Turno finalizado
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trip]
+                properties:
+                  trip: { $ref: '#/components/schemas/Trip' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El turno ya estaba finalizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /driver/trips/{id}/positions:
+    post:
+      tags: [Chofer]
+      summary: Transmitir posicion
+      description: |
+        **El endpoint mas transitado del sistema.** Enviar cada
+        `DRIVER_PING_INTERVAL_MS` (4s) mientras el turno este activo.
+
+        Acepta una posicion suelta o un lote `{ positions: [...] }`, para que el
+        cliente pueda vaciar de golpe lo que acumulo mientras estuvo sin senal.
+
+        Se descartan las posiciones con `timestamp` mas de 60s en el futuro: un
+        celular con el reloj mal no debe envenenar la frescura.
+
+        El 202 con `ok: true` es lo que enciende el indicador "transmitiendo
+        correctamente" en la pantalla del chofer. Si la peticion falla, la app
+        debe avisarlo en pantalla: el chofer tiene que saber que dejo de reportar.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/PositionInput'
+                - type: object
+                  required: [positions]
+                  properties:
+                    positions:
+                      type: array
+                      minItems: 1
+                      maxItems: 200
+                      items: { $ref: '#/components/schemas/PositionInput' }
+            examples:
+              suelta:
+                summary: Ping normal
+                value:
+                  latitude: -33.6091
+                  longitude: -70.8739
+                  speed: 60
+                  heading: 70
+                  timestamp: 1786808949259
+              lote:
+                summary: Vaciado tras recuperar senal
+                value:
+                  positions:
+                    - { latitude: -33.61, longitude: -70.8767, timestamp: 1786808940000 }
+                    - { latitude: -33.6091, longitude: -70.8739, timestamp: 1786808949259 }
+      responses:
+        '202':
+          description: |
+            Posicion recibida. `accepted` es cuantas muestras se aceptaron: puede
+            ser 0 si todas venian con timestamp futuro.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, receivedAt, accepted]
+                properties:
+                  ok: { type: boolean, const: true }
+                  receivedAt: { type: string, format: date-time }
+                  accepted: { type: integer, minimum: 0 }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: El turno no existe o no es de este chofer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: El turno no esta en curso
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /driver/trips/{id}/occupancy:
+    post:
+      tags: [Chofer]
+      summary: Reportar ocupacion (voto del chofer)
+      description: |
+        El chofer sabe mejor que nadie cuanta gente lleva, asi que su reporte
+        manda sobre el de los pasajeros mientras siga vigente.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TripId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportOccupancy' }
+      responses:
+        '200':
+          description: Estado de ocupacion resuelto
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [occupancy]
+                properties:
+                  occupancy: { $ref: '#/components/schemas/Occupancy' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /company/routes:
+    get:
+      tags: [Empresa]
+      summary: Recorridos de la empresa
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Recorridos con sus paraderos y horarios
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CompanyRoute' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Empresa]
+      summary: Crear recorrido
+      description: Cada sentido es un recorrido propio (ida y vuelta por separado).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRouteInput' }
+      responses:
+        '201':
+          description: Recorrido creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyRoute' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Ya existe un recorrido con ese codigo en la empresa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /company/routes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RouteId'
+    get:
+      tags: [Empresa]
+      summary: Detalle de un recorrido propio
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Recorrido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyRoute' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFoundOrForeign'
+    patch:
+      tags: [Empresa]
+      summary: Editar recorrido
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRouteInput' }
+      responses:
+        '200':
+          description: Recorrido actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyRoute' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFoundOrForeign'
+        '409':
+          description: Codigo ya usado por otro recorrido de la empresa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Empresa]
+      summary: Eliminar recorrido
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Eliminado }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFoundOrForeign'
+
+  /company/routes/{id}/stops:
+    put:
+      tags: [Empresa]
+      summary: Reemplazar los paraderos del recorrido
+      description: |
+        **Reemplazo completo, no parcial.** La lista enviada pasa a ser la unica
+        verdad y el `stopOrder` se asigna por la posicion en el array (0, 1, 2...).
+        Reordenar es mandar la lista en otro orden; no hay endpoint de "mover uno".
+
+        El orden es lo que permite razonar sobre el avance de la micro, asi que el
+        primer paradero debe ser el origen y el ultimo el destino.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/RouteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceStopsInput' }
+      responses:
+        '200':
+          description: Paraderos resultantes, ya ordenados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RouteStop' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFoundOrForeign'
+
+  /company/routes/{id}/schedules:
+    put:
+      tags: [Empresa]
+      summary: Reemplazar los horarios del recorrido
+      description: Mismo criterio que los paraderos. Un horario por tipo de dia.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/RouteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertSchedulesInput' }
+      responses:
+        '200':
+          description: Horarios resultantes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Schedule' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFoundOrForeign'
+
+  /company/drivers:
+    get:
+      tags: [Empresa]
+      summary: Choferes de la empresa
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Choferes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Driver' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Empresa]
+      summary: Dar de alta un chofer
+      description: |
+        La empresa crea la cuenta, no el chofer. La respuesta incluye
+        `temporaryPassword` **en claro y por unica vez**, para que el admin se la
+        dicte; despues solo queda el hash. El chofer entra con ella y
+        `mustChangePassword` queda en `true`.
+
+        El frontend debe mostrar esa clave de forma destacada y advertir que no se
+        podra volver a ver.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDriverInput' }
+      responses:
+        '201':
+          description: Chofer creado, con su clave temporal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedDriver' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Ya existe una cuenta con ese correo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /company/drivers/{id}:
+    patch:
+      tags: [Empresa]
+      summary: Editar un chofer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDriverInput' }
+      responses:
+        '200':
+          description: Chofer actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Driver' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFoundOrForeign'
+
+  /company/trips/live:
+    get:
+      tags: [Empresa]
+      summary: Micros de la empresa en ruta ahora
+      description: |
+        Monitoreo de flota. Un turno recien iniciado que todavia no envio ninguna
+        posicion aparece igual, con `position: null` y `freshness: NO_SIGNAL`:
+        ocultarlo haria creer que la micro no salio.
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Turnos en curso
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [serverTime, trips]
+                properties:
+                  serverTime: { type: string, format: date-time }
+                  trips:
+                    type: array
+                    items: { $ref: '#/components/schemas/CompanyLiveTrip' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/companies:
+    get:
+      tags: [Superadmin]
+      summary: Listar empresas
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Empresas con sus conteos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CompanySummary' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Superadmin]
+      summary: Crear empresa
+      description: |
+        Crea la empresa junto a su administrador: sin ese usuario la empresa
+        quedaria creada pero sin nadie que pueda entrar. Devuelve la clave
+        temporal del admin una sola vez.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCompanyInput' }
+      responses:
+        '201':
+          description: Empresa y administrador creados
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreatedCompany' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: El email del administrador ya esta registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/companies/{id}:
+    patch:
+      tags: [Superadmin]
+      summary: Editar o suspender una empresa
+      description: |
+        Suspender una empresa la saca de los resultados publicos y bloquea el
+        login de sus cuentas.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCompanyInput' }
+      responses:
+        '200':
+          description: Empresa actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanySummary' }
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/metrics:
+    get:
+      tags: [Superadmin]
+      summary: Metricas de la plataforma
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Totales
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformMetrics' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        `Authorization: Bearer <token>`. El token sale de `/auth/login` o
+        `/auth/register` y dura 12 horas. No hay refresh token.
+
+  parameters:
+    RouteId:
+      name: id
+      in: path
+      required: true
+      description: Id del recorrido
+      schema: { type: string }
+    TripId:
+      name: id
+      in: path
+      required: true
+      description: Id del turno
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Falta el token o no es valido
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: El rol de la cuenta no permite esta accion
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFoundOrForeign:
+      description: |
+        No encontrado. **Un recurso de otra empresa responde 404, no 403**: no se
+        confirma siquiera que exista.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: |
+        Datos invalidos. `error.details` trae los mensajes por campo, listos para
+        pintar bajo cada input del formulario.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              message: Datos invalidos
+              details:
+                email: [Invalid email]
+    TooManyRequests:
+      description: Se supero el limite de peticiones
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      description: |
+        Forma unica de error en toda la API. Nunca expone stack traces ni
+        estructura interna.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties:
+            message: { type: string }
+            details:
+              description: Detalle por campo en los errores de validacion.
+
+    Health:
+      type: object
+      required: [status, db, uptime]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        db: { type: string, enum: [ok, down] }
+        uptime: { type: number, description: Segundos desde que arranco el proceso }
+
+    LatLng:
+      type: object
+      description: Compatible con `google.maps.LatLngLiteral`.
+      required: [lat, lng]
+      properties:
+        lat: { type: number, minimum: -90, maximum: 90, examples: [-33.6091] }
+        lng: { type: number, minimum: -180, maximum: 180, examples: [-70.8739] }
+
+    Freshness:
+      type: string
+      description: |
+        Estado de frescura de una posicion. **Debe mostrarse siempre junto a la
+        posicion, con etiqueta y color distinguibles.**
+
+        - `LIVE`: menos de 30s. "Actualizado hace X seg"
+        - `INTERMITTENT`: entre 30s y 2min. "Ultima senal hace X min, puede haber avanzado"
+        - `NO_SIGNAL`: mas de 2min con el turno aun activo. "Sin senal hace X min, posicion no confiable"
+        - `OUT_OF_SERVICE`: sin turno activo. "No hay micros en ruta"
+      enum: [LIVE, INTERMITTENT, NO_SIGNAL, OUT_OF_SERVICE]
+
+    DayType:
+      type: string
+      enum: [WEEKDAY, SATURDAY, SUNDAY]
+
+    Role:
+      type: string
+      enum: [SUPERADMIN, COMPANY_ADMIN, DRIVER, PASSENGER]
+
+    TripStatus:
+      type: string
+      enum: [IN_TRANSIT, COMPLETED, CANCELLED]
+
+    # --- Auth ---
+
+    RegisterInput:
+      type: object
+      required: [email, password, name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        name: { type: string, minLength: 2, maxLength: 120 }
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, examples: ['chofer1@bupesa.cl'] }
+        password: { type: string, examples: [demo1234] }
+
+    PublicUser:
+      type: object
+      required: [id, email, name, role, companyId, mustChangePassword]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        companyId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: null para superadmin y pasajeros.
+        mustChangePassword:
+          type: boolean
+          description: |
+            true cuando la cuenta se creo con clave temporal. El frontend deberia
+            llevar a cambiarla antes de dejar operar.
+
+    AuthResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token: { type: string, description: JWT valido por 12 horas }
+        user: { $ref: '#/components/schemas/PublicUser' }
+
+    # --- Recorridos (vista publica) ---
+
+    RouteSummary:
+      type: object
+      required: [id, name, code, originName, destinationName, companyName, activeBuses]
+      properties:
+        id: { type: string }
+        name: { type: string, examples: [Vicuna Corriente] }
+        code: { type: string, examples: [VIC-IDA] }
+        originName: { type: string, examples: [Terminal Penaflor] }
+        destinationName: { type: string, examples: [Terminal San Borja] }
+        companyName: { type: string }
+        activeBuses:
+          type: integer
+          minimum: 0
+          description: |
+            Micros con turno en curso ahora. En 0, el frontend puede anticipar
+            "sin micros en ruta" sin llegar a consultar `/live`.
+
+    RouteDetail:
+      allOf:
+        - $ref: '#/components/schemas/RouteSummary'
+        - type: object
+          required: [stops, schedules]
+          properties:
+            stops:
+              type: array
+              description: Ordenados por `stopOrder` ascendente.
+              items: { $ref: '#/components/schemas/RouteStop' }
+            schedules:
+              type: array
+              items: { $ref: '#/components/schemas/Schedule' }
+
+    RouteStop:
+      type: object
+      required: [id, name, lat, lng, stopOrder]
+      properties:
+        id: { type: string }
+        name: { type: string, examples: [Malloco] }
+        lat: { type: number }
+        lng: { type: number }
+        stopOrder:
+          type: integer
+          minimum: 0
+          description: Posicion en el recorrido. 0 es el origen.
+
+    Schedule:
+      type: object
+      description: Horario referencial de primera y ultima salida.
+      required: [dayType, firstDeparture, lastDeparture]
+      properties:
+        dayType: { $ref: '#/components/schemas/DayType' }
+        firstDeparture: { type: string, pattern: '^\d{1,2}:\d{2}$', examples: ['4:23'] }
+        lastDeparture: { type: string, pattern: '^\d{1,2}:\d{2}$', examples: ['21:33'] }
+
+    # --- Vista en vivo ---
+
+    Occupancy:
+      type: object
+      description: |
+        Estado de ocupacion colaborativo. Igual que la posicion, declara su origen
+        y su antiguedad en vez de presentarse como un hecho.
+      required: [status, source, reportCount, updatedAt]
+      properties:
+        status:
+          type: string
+          enum: [FULL, NOT_FULL, UNKNOWN]
+          description: '`UNKNOWN` cuando no hay ningun reporte vigente.'
+        source:
+          oneOf:
+            - { type: string, enum: [DRIVER, PASSENGERS] }
+            - { type: 'null' }
+          description: |
+            De donde sale el veredicto. `DRIVER` gana siempre sobre `PASSENGERS`
+            mientras su reporte siga dentro de la ventana de 15 minutos.
+        reportCount: { type: integer, minimum: 0 }
+        updatedAt:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+
+    LiveBus:
+      type: object
+      required:
+        - tripId
+        - routeId
+        - driverName
+        - position
+        - speed
+        - heading
+        - recordedAt
+        - ageSeconds
+        - freshness
+        - distanceMeters
+        - occupancy
+      properties:
+        tripId:
+          type: string
+          description: Necesario para reportar la ocupacion de esta micro.
+        routeId: { type: string }
+        driverName: { type: string }
+        position: { $ref: '#/components/schemas/LatLng' }
+        speed:
+          oneOf: [{ type: number }, { type: 'null' }]
+          description: km/h reportados por el dispositivo.
+        heading:
+          oneOf: [{ type: number, minimum: 0, maximum: 360 }, { type: 'null' }]
+          description: Rumbo en grados. Sirve para rotar el icono en el mapa.
+        recordedAt:
+          type: string
+          format: date-time
+          description: Momento en que el chofer registro la posicion.
+        ageSeconds:
+          type: integer
+          minimum: 0
+          description: Antiguedad segun el reloj del servidor.
+        freshness: { $ref: '#/components/schemas/Freshness' }
+        distanceMeters:
+          oneOf: [{ type: integer }, { type: 'null' }]
+          description: |
+            Distancia en linea recta al `stopId` consultado.
+
+            **Es `null` si no se paso `stopId` o si la frescura es `NO_SIGNAL`.**
+            En ese caso el frontend no debe estimar nada por su cuenta: la
+            posicion es demasiado vieja para sostener una distancia.
+        occupancy: { $ref: '#/components/schemas/Occupancy' }
+
+    LiveRoute:
+      type: object
+      required: [routeId, routeName, serverTime, stopId, buses, outOfService]
+      properties:
+        routeId: { type: string }
+        routeName: { type: string }
+        serverTime:
+          type: string
+          format: date-time
+          description: |
+            Reloj del servidor. Calcular las antiguedades contra este valor y no
+            contra el del dispositivo, que puede estar desajustado.
+        stopId:
+          oneOf: [{ type: string }, { type: 'null' }]
+        buses:
+          type: array
+          description: Ordenadas por cercania al paradero consultado.
+          items: { $ref: '#/components/schemas/LiveBus' }
+        outOfService:
+          type: boolean
+          description: |
+            true cuando no hay ninguna micro transmitiendo. Mostrar "No hay micros
+            en ruta" de forma explicita.
+
+    PositionInput:
+      type: object
+      description: |
+        Formato de la Geolocation API del navegador: `latitude`/`longitude`, no
+        `lat`/`lng`. Es el unico lugar de la API con esta nomenclatura.
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        speed:
+          oneOf: [{ type: number, minimum: 0, maximum: 300 }, { type: 'null' }]
+        heading:
+          oneOf: [{ type: number, minimum: 0, maximum: 360 }, { type: 'null' }]
+        timestamp:
+          type: integer
+          description: |
+            Epoch en milisegundos. Si falta, el servidor usa su propio reloj.
+            Se descarta si viene mas de 60s en el futuro.
+
+    ReportOccupancy:
+      type: object
+      required: [full]
+      properties:
+        full:
+          type: boolean
+          description: '`true` = va llena, `false` = ya no va llena.'
+
+    # --- Turnos ---
+
+    Trip:
+      type: object
+      required: [id, routeId, routeName, driverId, status, startedAt, endedAt]
+      properties:
+        id: { type: string }
+        routeId: { type: string }
+        routeName: { type: string }
+        driverId: { type: string }
+        status: { $ref: '#/components/schemas/TripStatus' }
+        startedAt: { type: string, format: date-time }
+        endedAt:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+
+    DriverRoute:
+      type: object
+      required: [id, code, name, originName, destinationName]
+      properties:
+        id: { type: string }
+        code: { type: string }
+        name: { type: string }
+        originName: { type: string }
+        destinationName: { type: string }
+
+    # --- Panel de empresa ---
+
+    CompanyRoute:
+      type: object
+      required:
+        - id
+        - companyId
+        - name
+        - code
+        - originName
+        - destinationName
+        - active
+        - createdAt
+        - updatedAt
+        - stops
+        - schedules
+      properties:
+        id: { type: string }
+        companyId: { type: string }
+        name: { type: string }
+        code: { type: string }
+        originName: { type: string }
+        destinationName: { type: string }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        stops:
+          type: array
+          items: { $ref: '#/components/schemas/RouteStop' }
+        schedules:
+          type: array
+          items: { $ref: '#/components/schemas/Schedule' }
+
+    CreateRouteInput:
+      type: object
+      required: [name, code, originName, destinationName]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: Unico dentro de la empresa.
+        originName: { type: string, minLength: 2, maxLength: 120 }
+        destinationName: { type: string, minLength: 2, maxLength: 120 }
+        active: { type: boolean, default: true }
+
+    UpdateRouteInput:
+      type: object
+      description: Todos los campos son opcionales.
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        code: { type: string, minLength: 1, maxLength: 40 }
+        originName: { type: string, minLength: 2, maxLength: 120 }
+        destinationName: { type: string, minLength: 2, maxLength: 120 }
+        active: { type: boolean }
+
+    ReplaceStopsInput:
+      type: object
+      required: [stops]
+      properties:
+        stops:
+          type: array
+          minItems: 2
+          maxItems: 200
+          description: |
+            El orden del array define el `stopOrder`. Minimo dos: origen y destino.
+          items:
+            type: object
+            required: [name, lat, lng]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 120 }
+              lat: { type: number, minimum: -90, maximum: 90 }
+              lng: { type: number, minimum: -180, maximum: 180 }
+
+    UpsertSchedulesInput:
+      type: object
+      required: [schedules]
+      properties:
+        schedules:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/Schedule' }
+
+    Driver:
+      type: object
+      required: [id, name, email, licenseNumber, driverStatus, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        licenseNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+        driverStatus:
+          oneOf:
+            - { type: string, enum: [PENDING, ACTIVE, SUSPENDED] }
+            - { type: 'null' }
+        createdAt: { type: string, format: date-time }
+
+    CreatedDriver:
+      allOf:
+        - $ref: '#/components/schemas/Driver'
+        - type: object
+          required: [temporaryPassword]
+          properties:
+            temporaryPassword:
+              type: string
+              description: |
+                Clave en claro, devuelta **una unica vez**. Sin caracteres
+                ambiguos, porque se transmite de viva voz.
+
+    CreateDriverInput:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email }
+        licenseNumber: { type: string, maxLength: 40 }
+
+    UpdateDriverInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        licenseNumber: { type: string, maxLength: 40 }
+        driverStatus: { type: string, enum: [PENDING, ACTIVE, SUSPENDED] }
+
+    CompanyLiveTrip:
+      type: object
+      required:
+        [
+          tripId,
+          routeId,
+          routeName,
+          driverId,
+          driverName,
+          startedAt,
+          position,
+          recordedAt,
+          ageSeconds,
+          freshness,
+        ]
+      properties:
+        tripId: { type: string }
+        routeId: { type: string }
+        routeName: { type: string }
+        driverId: { type: string }
+        driverName: { type: string }
+        startedAt: { type: string, format: date-time }
+        position:
+          oneOf:
+            - { $ref: '#/components/schemas/LatLng' }
+            - { type: 'null' }
+          description: null si el turno arranco pero aun no llega ninguna posicion.
+        recordedAt:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+        ageSeconds:
+          oneOf: [{ type: integer, minimum: 0 }, { type: 'null' }]
+        freshness: { $ref: '#/components/schemas/Freshness' }
+
+    # --- Superadmin ---
+
+    CompanySummary:
+      type: object
+      required: [id, name, rut, status, createdAt, routeCount, userCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        rut:
+          oneOf: [{ type: string }, { type: 'null' }]
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+        createdAt: { type: string, format: date-time }
+        routeCount: { type: integer, minimum: 0 }
+        userCount: { type: integer, minimum: 0 }
+
+    CreatedCompany:
+      allOf:
+        - $ref: '#/components/schemas/CompanySummary'
+        - type: object
+          required: [adminEmail, temporaryPassword]
+          properties:
+            adminEmail: { type: string, format: email }
+            temporaryPassword:
+              type: string
+              description: Clave del administrador, devuelta una unica vez.
+
+    CreateCompanyInput:
+      type: object
+      required: [name, adminEmail, adminName]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 160 }
+        rut: { type: string, maxLength: 20 }
+        adminEmail: { type: string, format: email }
+        adminName: { type: string, minLength: 2, maxLength: 120 }
+
+    UpdateCompanyInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 160 }
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+
+    PlatformMetrics:
+      type: object
+      required: [companies, routes, drivers, activeTrips, tripsToday]
+      properties:
+        companies: { type: integer }
+        routes: { type: integer }
+        drivers: { type: integer }
+        activeTrips: { type: integer, description: Turnos IN_TRANSIT ahora mismo }
+        tripsToday: { type: integer, description: Turnos iniciados desde medianoche }

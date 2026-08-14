@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sin `version`: la action falla si se le da una y ademas existe
+      # packageManager en package.json. Esa es la unica fuente de verdad,
+      # asi CI usa exactamente la misma version de pnpm que el equipo en local.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # El cliente de Prisma se necesita para typecheck y build.
+      - name: Generar cliente de Prisma
+        run: pnpm db:generate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Formato
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Los tests del API mockean Prisma: no hace falta Postgres en CI.
+      - name: Tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
