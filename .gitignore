@@ -1,0 +1,23 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.yarn/*
+!frontend/.yarn/patches
+!frontend/.yarn/plugins
+!frontend/.yarn/releases
+!frontend/.yarn/sdks
+!frontend/.yarn/versions
+frontend/.pnp.*
+
+# Backend (ajustar según stack)
+backend/node_modules/
+backend/venv/
+backend/__pycache__/
+backend/dist/
+
+# Env
+*.env
+.env.local
+
+# OS
+.DS_Store
