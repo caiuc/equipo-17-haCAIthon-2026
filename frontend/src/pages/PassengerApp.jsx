@@ -5,7 +5,6 @@ import { MapView } from "@/components/passenger/MapView"
 import { RideSheet } from "@/components/passenger/RideSheet"
 import { CompanyFilter } from "@/components/search/CompanyFilter"
 import { LocateButton } from "@/components/passenger/LocateButton"
-import { MicroDetailSheet } from "@/components/passenger/MicroDetailSheet"
 import { useCompanies } from "@/hooks/useCompanies"
 import { useCompany } from "@/hooks/useCompany"
 import { useElapsedSince } from "@/hooks/useElapsedSince"
@@ -463,22 +462,13 @@ export default function PassengerApp() {
         companyFares={companyFares}
         myVotes={myVotes}
         nearestStop={nearest}
-      />
-
-      {/* El detalle de la micro. `bus` viene del mismo polling que el mapa, asi
-          que la frescura, la distancia y la ocupacion se siguen actualizando con
-          el modal abierto: congelarlas seria mostrar un dato viejo como fresco. */}
-      <MicroDetailSheet
-        bus={selectedBus}
-        route={detailRoute}
-        routeLoading={detailRouteLoading}
-        company={company}
-        companyLoading={companyLoading}
-        stop={selectedStop}
-        elapsedMs={elapsedMs}
-        myVote={selectedBus ? (myVotes[selectedBus.tripId] ?? null) : null}
-        onReportOccupancy={handleReportOccupancy}
-        onClose={() => setSelectedBusId(null)}
+        // Con una micro elegida la hoja deja de ser lista y pasa a ser su ficha:
+        // todo lo que necesita para eso viaja junto, y lo vivo sigue vivo porque
+        // `selectedBus` sale del mismo polling que alimenta el mapa.
+        selectedBus={selectedBus}
+        detailRoute={detailRoute}
+        detailRouteLoading={detailRouteLoading}
+        selectedStop={selectedStop}
       />
     </div>
   )

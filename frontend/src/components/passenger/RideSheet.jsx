@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { BusFront, ChevronUp, Navigation } from "lucide-react"
+import { ArrowLeft, BusFront, ChevronUp, Navigation } from "lucide-react"
 import { CompanyCard } from "@/components/passenger/CompanyCard"
 import { MicroCard } from "@/components/passenger/MicroCard"
+import { MicroDetail } from "@/components/passenger/MicroDetail"
 import { formatDistance, outOfServiceStyle } from "@/lib/freshness"
 import { usePrefersReducedMotion } from "@/lib/motion"
 
@@ -126,11 +127,19 @@ export function RideSheet({
   companyLoading = false,
   companyFares = [],
   nearestStop = null,
+  selectedBus = null,
+  detailRoute = null,
+  detailRouteLoading = false,
+  selectedStop = null,
 }) {
   const reducedMotion = usePrefersReducedMotion()
   const sheetRef = useRef(null)
   const scrollRef = useRef(null)
   const gesture = useRef(null)
+  // Fila de cada micro, para traer a la vista la que se estaba mirando al volver
+  // a la lista.
+  const rowsRef = useRef(new Map())
+  const lastSelected = useRef(null)
   // El navegador dispara `click` despues de un arrastre sobre el mismo boton:
   // sin esta marca el gesto movia la hoja y el click la volvia a mover.
   const dragged = useRef(false)
@@ -168,6 +177,14 @@ export function RideSheet({
   const offset = dragOffset ?? offsets[detent]
   const dragging = dragOffset != null
 
+  // Cuanto de la hoja se ve, publicado como variable CSS en el contenedor. Con
+  // eso los controles flotantes del mapa se apoyan sobre el borde de la hoja sin
+  // que el padre tenga que re-renderizarse en cada frame del arrastre.
+  useLayoutEffect(() => {
+    const parent = sheetRef.current?.parentElement
+    parent?.style.setProperty("--sheet-visible", `${Math.max(0, fullHeight - offset)}px`)
+  }, [fullHeight, offset])
+
   const nearestDetent = useCallback(
     (value) =>
       ORDER.reduce((best, name) =>
@@ -181,6 +198,41 @@ export function RideSheet({
   useEffect(() => {
     if (selectedBusId) setDetent((current) => (current === "peek" ? "mid" : current))
   }, [selectedBusId])
+
+  /*
+   * Que la micro elegida QUEDE A LA VISTA, en los dos sentidos.
+   *
+   * Con 43 micros en ruta, tocar en el mapa una que cae en el puesto 30 la
+   * marcaba fuera de pantalla: la interfaz respondia y nadie lo veia, o sea que
+   * para el pasajero no pasaba nada. Ahora la hoja se convierte en su ficha, asi
+   * que basta con llevar el scroll arriba — si venia leyendo la lista a mitad de
+   * camino, la ficha aparecia empezada por la mitad.
+   *
+   * Al volver, la fila de la que se estaba mirando se trae a la vista: sin eso,
+   * la lista reaparece desde arriba y hay que buscarla de nuevo.
+   *
+   * El doble `requestAnimationFrame` deja que React pinte antes de medir. La
+   * animacion de la hoja no interfiere: lo que se anima es `translateY` y no el
+   * alto, asi que el contenedor con scroll mide igual durante la transicion.
+   */
+  useEffect(() => {
+    const previo = lastSelected.current
+    lastSelected.current = selectedBusId
+
+    let inner = 0
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        const behavior = reducedMotion ? "auto" : "smooth"
+        if (selectedBusId) scrollRef.current?.scrollTo({ top: 0, behavior })
+        else if (previo) rowsRef.current.get(previo)?.scrollIntoView({ block: "nearest", behavior })
+      })
+    })
+
+    return () => {
+      cancelAnimationFrame(outer)
+      cancelAnimationFrame(inner)
+    }
+  }, [selectedBusId, reducedMotion])
 
   // Una vez que el gesto es un arrastre de la hoja, el scroll nativo de la lista
   // tiene que dejar de competir. `touchmove` no puede ser pasivo para poder
@@ -299,9 +351,11 @@ export function RideSheet({
         {detent === "peek" && (
           <span className="flex items-center gap-1 text-[11px] text-[var(--ink-soft)]">
             <ChevronUp className="h-3 w-3" />
-            {sinMicros
-              ? "No hay micros en ruta ahora"
-              : `${buses.length} ${buses.length === 1 ? "micro en ruta" : "micros en ruta"}`}
+            {selectedBus
+              ? `${selectedBus.routeCode} · ${selectedBus.company.name}`
+              : sinMicros
+                ? "No hay micros en ruta ahora"
+                : `${buses.length} ${buses.length === 1 ? "micro en ruta" : "micros en ruta"}`}
           </span>
         )}
       </button>
@@ -311,6 +365,57 @@ export function RideSheet({
         onPointerDown={(event) => handlePointerDown(event, false)}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8"
       >
+        {/*
+         * Elegida una micro, la hoja DEJA de ser lista y pasa a ser su ficha. La
+         * lista sirve para elegir; una vez elegida, seguir mostrando las otras 42
+         * es ruido sobre la unica que importa. La flecha atras es el camino de
+         * vuelta, y esta arriba a la izquierda donde ya se busca.
+         */}
+        {selectedBus ? (
+          <>
+            <div className="sticky top-0 z-10 -mx-4 flex items-center gap-2 bg-white/95 px-4 pb-3 pt-1 backdrop-blur-xl">
+              <button
+                type="button"
+                onClick={() => onSelectBus?.(null)}
+                aria-label="Volver a la lista de micros"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--mist)] text-[var(--ink)]"
+              >
+                <ArrowLeft className="h-4.5 w-4.5" strokeWidth={2} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[17px] font-semibold leading-tight text-[var(--ink)]">
+                  Micro actual
+                </h2>
+                <p className="truncate text-[13px] text-[var(--ink-soft)]">
+                  {selectedBus.routeCode} · {selectedBus.company.name}
+                </p>
+              </div>
+            </div>
+
+            <MicroCard
+              bus={selectedBus}
+              selected
+              onSelect={() => onSelectBus?.(null)}
+              onReportOccupancy={onReportOccupancy}
+              myVote={myVotes[selectedBus.tripId] ?? null}
+              elapsedMs={elapsedMs}
+              showVote={false}
+            />
+
+            <MicroDetail
+              bus={selectedBus}
+              route={detailRoute}
+              routeLoading={detailRouteLoading}
+              company={company}
+              companyLoading={companyLoading}
+              stop={selectedStop}
+              elapsedMs={elapsedMs}
+              myVote={myVotes[selectedBus.tripId] ?? null}
+              onReportOccupancy={onReportOccupancy}
+            />
+          </>
+        ) : (
+          <>
         <div className="px-1 pb-3">
           {route ? (
             <>
@@ -370,6 +475,10 @@ export function RideSheet({
             {buses.map((bus) => (
               <MicroCard
                 key={bus.tripId}
+                ref={(node) => {
+                  if (node) rowsRef.current.set(bus.tripId, node)
+                  else rowsRef.current.delete(bus.tripId)
+                }}
                 bus={bus}
                 selected={bus.tripId === selectedBusId}
                 onSelect={onSelectBus}
@@ -379,6 +488,8 @@ export function RideSheet({
               />
             ))}
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

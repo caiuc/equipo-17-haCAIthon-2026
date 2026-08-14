@@ -27,7 +27,13 @@ export function LocateButton({ status, accuracy = null, onRequest }) {
         : "Mostrar mi ubicación"
 
   return (
-    <div className="pointer-events-none absolute right-4 bottom-0 z-20 flex flex-col items-end gap-2">
+    <div
+      // Se apoya sobre el borde superior de la hoja de micros, que publica su
+      // alto visible en `--sheet-visible`. Anclado al fondo quedaria tapado por
+      // ella justo cuando el pasajero quiere ubicarse.
+      style={{ bottom: "calc(var(--sheet-visible, 45svh) + 12px)" }}
+      className="pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-2"
+    >
       {/* Un permiso denegado no se deja como un boton que no hace nada: se dice
           que pasó y donde se arregla. */}
       {denied && (

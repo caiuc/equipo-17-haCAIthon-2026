@@ -31,7 +31,16 @@ function DistanceLine({ distanceMeters, unreliable }) {
  * tocarla, en `MicroDetailSheet`. Meterlo todo en la tarjeta convertiria la
  * lista en algo imposible de barrer con el pulgar.
  */
-export function MicroCard({ bus, selected, onSelect, onReportOccupancy, myVote, elapsedMs = 0 }) {
+export function MicroCard({
+  ref,
+  bus,
+  selected,
+  onSelect,
+  onReportOccupancy,
+  myVote,
+  elapsedMs = 0,
+  showVote = true,
+}) {
   const freshness = getFreshness(bus, elapsedMs)
   const fare = formatFare(bus.fareAdultClp)
   // Sin señal significa que la posición ya no sostiene una distancia: no se
@@ -39,9 +48,22 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy, myVote, 
   const positionUnreliable = freshness.status === FRESHNESS.NO_SIGNAL
 
   return (
+    /*
+     * El verde de "seleccionada" NO puede ser el verde de "En vivo" (#1fae5f).
+     * Son dos cosas distintas y el mapa ya usa color para la empresa: si la
+     * seleccion se pintara con el mismo verde, una micro SIN SENAL seleccionada
+     * se leeria como si estuviera transmitiendo. Por eso la seleccion es fondo
+     * verde muy palido con borde verde oscuro — un tono que no aparece en ningun
+     * estado de frescura — y la frescura sigue viviendo en su punto y su texto,
+     * que no cambian de color al seleccionar.
+     */
     <div
-      className={`rounded-2xl border bg-white transition-colors ${
-        selected ? "border-[var(--ink)] shadow-sm" : "border-[var(--line)]"
+      ref={ref}
+      aria-current={selected ? "true" : undefined}
+      className={`rounded-2xl border-2 transition-colors ${
+        selected
+          ? "border-[#0f6b41] bg-[#f0faf4] shadow-sm"
+          : "border-[var(--line)] bg-white"
       }`}
     >
       <button
@@ -106,16 +128,21 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy, myVote, 
         </div>
       </button>
 
-      <Separator className="bg-[var(--line)]" />
-
-      <div className="px-3.5 py-2.5">
-        <OccupancyVote
-          occupancy={formatOccupancy(bus.occupancy)}
-          tripId={bus.tripId}
-          myVote={myVote}
-          onReportOccupancy={onReportOccupancy}
-        />
-      </div>
+      {/* Con la ficha abierta los botones de ocupacion ya viven en su seccion:
+          repetirlos aca dejaria dos pares de botones que hacen lo mismo. */}
+      {showVote && (
+        <>
+          <Separator className="bg-[var(--line)]" />
+          <div className="px-3.5 py-2.5">
+            <OccupancyVote
+              occupancy={formatOccupancy(bus.occupancy)}
+              tripId={bus.tripId}
+              myVote={myVote}
+              onReportOccupancy={onReportOccupancy}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }
