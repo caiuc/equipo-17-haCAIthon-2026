@@ -19,7 +19,11 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--line)] bg-[var(--paper)]/80 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between px-6">
-        <a href="#top" className="text-[19px] font-semibold tracking-[-0.02em] text-[var(--ink)]">
+        <a
+          href="#top"
+          className="flex items-center gap-2 text-[19px] font-semibold tracking-[-0.02em] text-[var(--ink)]"
+        >
+          <img src="/miqui-mark.svg" alt="" aria-hidden="true" className="h-7 w-auto" />
           miqui
         </a>
 

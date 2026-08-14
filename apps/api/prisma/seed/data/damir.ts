@@ -55,10 +55,18 @@ export const DAMIR: CompanySeed = {
   drivers: [
     { email: 'chofer1@damir.cl', name: 'Héctor Maldonado', licenseNumber: 'A3-620145' },
     { email: 'chofer2@damir.cl', name: 'Paula Riquelme', licenseNumber: 'A3-621390' },
+    { email: 'chofer3@damir.cl', name: 'Andres Pizarro', licenseNumber: 'A3-622740' },
+    { email: 'chofer4@damir.cl', name: 'Lorena Fuentes', licenseNumber: 'A3-623105' },
+    { email: 'chofer5@damir.cl', name: 'Cristian Vega', licenseNumber: 'A3-623588' },
+    { email: 'chofer6@damir.cl', name: 'Marcela Tapia', licenseNumber: 'A3-624011' },
   ],
   buses: [
     { plate: 'MNQB37', seats: null, assetSlug: null },
     { plate: 'SVTW90', seats: null, assetSlug: null },
+    { plate: 'KFZJ41', seats: null, assetSlug: null },
+    { plate: 'YSCL18', seats: null, assetSlug: null },
+    { plate: 'LJZZ80', seats: null, assetSlug: null },
+    { plate: 'GLPS50', seats: null, assetSlug: null },
   ],
   routes: [
     {

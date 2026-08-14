@@ -49,11 +49,19 @@ export const PAINE: CompanySeed = {
   drivers: [
     { email: 'chofer1@paine.cl', name: 'Alfredo Cornejo', licenseNumber: 'A3-840219' },
     { email: 'chofer2@paine.cl', name: 'Rosa Antimil', licenseNumber: 'A3-841503' },
+    { email: 'chofer3@paine.cl', name: 'Rodrigo Salinas', licenseNumber: 'A3-860155' },
+    { email: 'chofer4@paine.cl', name: 'Veronica Lagos', licenseNumber: 'A3-860633' },
+    { email: 'chofer5@paine.cl', name: 'Felipe Moreno', licenseNumber: 'A3-861027' },
+    { email: 'chofer6@paine.cl', name: 'Ana Cortes', licenseNumber: 'A3-861490' },
   ],
   buses: [
     { plate: 'GHDR46', seats: 19, assetSlug: null },
     { plate: 'JKPT80', seats: 20, assetSlug: null },
     { plate: 'NRLB12', seats: 19, assetSlug: null },
+    { plate: 'YGTX85', seats: null, assetSlug: null },
+    { plate: 'THJL29', seats: null, assetSlug: null },
+    { plate: 'FJCZ49', seats: null, assetSlug: null },
+    { plate: 'RRCH63', seats: null, assetSlug: null },
   ],
   routes: [
     {

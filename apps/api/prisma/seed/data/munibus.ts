@@ -534,6 +534,10 @@ export const MUNIBUS: CompanySeed = {
   drivers: [
     { email: 'chofer1@munibus.cl', name: 'Claudio Bravo', licenseNumber: 'A3-100238' },
     { email: 'chofer2@munibus.cl', name: 'Ximena Godoy', licenseNumber: 'A3-100794' },
+    { email: 'chofer3@munibus.cl', name: 'Sergio Bustos', licenseNumber: 'A3-970312' },
+    { email: 'chofer4@munibus.cl', name: 'Gloria Reyes', licenseNumber: 'A3-970845' },
+    { email: 'chofer5@munibus.cl', name: 'Alvaro Nunez', licenseNumber: 'A3-971208' },
+    { email: 'chofer6@munibus.cl', name: 'Ruth Contreras', licenseNumber: 'A3-971764' },
   ],
   buses: [
     { plate: 'ELCT01', seats: 75, assetSlug: null },
@@ -541,6 +545,10 @@ export const MUNIBUS: CompanySeed = {
     { plate: 'ELCT03', seats: 75, assetSlug: null },
     { plate: 'ELCT04', seats: 75, assetSlug: null },
     { plate: 'ELCT05', seats: 75, assetSlug: null },
+    { plate: 'DPLT71', seats: null, assetSlug: null },
+    { plate: 'DZDZ91', seats: null, assetSlug: null },
+    { plate: 'KKZL83', seats: null, assetSlug: null },
+    { plate: 'HPCX85', seats: null, assetSlug: null },
   ],
   routes: [
     {

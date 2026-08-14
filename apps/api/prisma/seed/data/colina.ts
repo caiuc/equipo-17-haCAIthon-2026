@@ -36,10 +36,18 @@ export const COLINA: CompanySeed = {
   drivers: [
     { email: 'chofer1@colina.cl', name: 'Mauricio Tapia', licenseNumber: 'A3-950877' },
     { email: 'chofer2@colina.cl', name: 'Elena Paredes', licenseNumber: 'A3-951342' },
+    { email: 'chofer3@colina.cl', name: 'Manuel Orellana', licenseNumber: 'A3-580129' },
+    { email: 'chofer4@colina.cl', name: 'Teresa Alarcon', licenseNumber: 'A3-580673' },
+    { email: 'chofer5@colina.cl', name: 'Diego Palma', licenseNumber: 'A3-581045' },
+    { email: 'chofer6@colina.cl', name: 'Silvia Torres', licenseNumber: 'A3-581512' },
   ],
   buses: [
     { plate: 'CDWX35', seats: null, assetSlug: null },
     { plate: 'FYRH68', seats: null, assetSlug: null },
+    { plate: 'TXKZ62', seats: null, assetSlug: null },
+    { plate: 'YWDW37', seats: null, assetSlug: null },
+    { plate: 'KXRJ56', seats: null, assetSlug: null },
+    { plate: 'BYVC52', seats: null, assetSlug: null },
   ],
   routes: [
     {

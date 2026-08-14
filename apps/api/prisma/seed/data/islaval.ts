@@ -66,11 +66,17 @@ export const ISLAVAL: CompanySeed = {
     { email: 'chofer1@islaval.cl', name: 'Patricio Salgado', licenseNumber: 'A3-510334' },
     { email: 'chofer2@islaval.cl', name: 'Nelly Cáceres', licenseNumber: 'A3-511208' },
     { email: 'chofer3@islaval.cl', name: 'Iván Bustos', licenseNumber: 'A3-512776' },
+    { email: 'chofer4@islaval.cl', name: 'Mauricio Leiva', licenseNumber: 'A3-441203' },
+    { email: 'chofer5@islaval.cl', name: 'Patricia Godoy', licenseNumber: 'A3-441667' },
+    { email: 'chofer6@islaval.cl', name: 'Rene Sandoval', licenseNumber: 'A3-442018' },
   ],
   buses: [
     { plate: 'FGQR84', seats: null, assetSlug: null },
     { plate: 'HJVP15', seats: null, assetSlug: null },
     { plate: 'KLDT62', seats: null, assetSlug: null },
+    { plate: 'XGVY53', seats: null, assetSlug: null },
+    { plate: 'BVSC55', seats: null, assetSlug: null },
+    { plate: 'CXSB61', seats: null, assetSlug: null },
   ],
   routes: [
     {

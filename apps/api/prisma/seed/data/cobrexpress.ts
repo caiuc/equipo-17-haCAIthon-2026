@@ -49,11 +49,19 @@ export const COBREXPRESS: CompanySeed = {
   drivers: [
     { email: 'chofer1@cobrexpress.cl', name: 'Danilo Vergara', licenseNumber: 'A3-730551' },
     { email: 'chofer2@cobrexpress.cl', name: 'Sandra Ojeda', licenseNumber: 'A3-731064' },
+    { email: 'chofer3@cobrexpress.cl', name: 'Jorge Espinoza', licenseNumber: 'A3-751340' },
+    { email: 'chofer4@cobrexpress.cl', name: 'Daniela Munoz', licenseNumber: 'A3-751802' },
+    { email: 'chofer5@cobrexpress.cl', name: 'Hugo Carrasco', licenseNumber: 'A3-752266' },
+    { email: 'chofer6@cobrexpress.cl', name: 'Elena Poblete', licenseNumber: 'A3-752719' },
   ],
   buses: [
     { plate: 'PWRJ23', seats: null, assetSlug: null },
     { plate: 'TZGC58', seats: null, assetSlug: null },
     { plate: 'VBNL71', seats: null, assetSlug: null },
+    { plate: 'HRFL52', seats: null, assetSlug: null },
+    { plate: 'BCSB69', seats: null, assetSlug: null },
+    { plate: 'LXCJ49', seats: null, assetSlug: null },
+    { plate: 'LDXB89', seats: null, assetSlug: null },
   ],
   routes: [
     {

@@ -86,12 +86,18 @@ export const BUPESA: CompanySeed = {
     { email: 'chofer1@bupesa.cl', name: 'Luis Farías', licenseNumber: 'A3-114455' },
     { email: 'chofer2@bupesa.cl', name: 'Marta Núñez', licenseNumber: 'A3-228877' },
     { email: 'chofer3@bupesa.cl', name: 'José Quintana', licenseNumber: 'A3-330099' },
+    { email: 'chofer4@bupesa.cl', name: 'Rosa Villalobos', licenseNumber: 'A3-114901' },
+    { email: 'chofer5@bupesa.cl', name: 'Pedro Cifuentes', licenseNumber: 'A3-115233' },
+    { email: 'chofer6@bupesa.cl', name: 'Ximena Bravo', licenseNumber: 'A3-115877' },
   ],
   buses: [
     { plate: 'JTKR52', seats: null, assetSlug: null },
     { plate: 'LBWD18', seats: null, assetSlug: null },
     { plate: 'PFZC73', seats: null, assetSlug: null },
     { plate: 'RHVN46', seats: null, assetSlug: null },
+    { plate: 'YVPS47', seats: null, assetSlug: null },
+    { plate: 'HZLF13', seats: null, assetSlug: null },
+    { plate: 'KTVL74', seats: null, assetSlug: null },
   ],
   routes: [
     // --- Desde Terminal Peñaflor hacia Terminal San Borja ---

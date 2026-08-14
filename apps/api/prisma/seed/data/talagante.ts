@@ -63,11 +63,19 @@ export const TALAGANTE: CompanySeed = {
   drivers: [
     { email: 'chofer1@talagante.cl', name: 'Rodrigo Pizarro', licenseNumber: 'A3-401122' },
     { email: 'chofer2@talagante.cl', name: 'Carmen Lillo', licenseNumber: 'A3-401987' },
+    { email: 'chofer3@talagante.cl', name: 'Nelson Aguirre', licenseNumber: 'A3-330214' },
+    { email: 'chofer4@talagante.cl', name: 'Carla Mendez', licenseNumber: 'A3-330788' },
+    { email: 'chofer5@talagante.cl', name: 'Ivan Rojas', licenseNumber: 'A3-331092' },
+    { email: 'chofer6@talagante.cl', name: 'Sonia Herrera', licenseNumber: 'A3-331455' },
   ],
   buses: [
     { plate: 'BXHT41', seats: null, assetSlug: null },
     { plate: 'CKMD67', seats: null, assetSlug: null },
     { plate: 'DTLS29', seats: null, assetSlug: null },
+    { plate: 'RTGZ17', seats: null, assetSlug: null },
+    { plate: 'GJGZ81', seats: null, assetSlug: null },
+    { plate: 'JRZF91', seats: null, assetSlug: null },
+    { plate: 'DPVD74', seats: null, assetSlug: null },
   ],
   routes: [
     {

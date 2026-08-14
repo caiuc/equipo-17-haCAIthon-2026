@@ -1,0 +1,33 @@
+<!--
+  Solo el iconito de la micro, sin el texto "Miqui" del logo completo.
+  La navbar y el footer escriben el nombre con la tipografia del sitio (Inter),
+  asi que repetirlo dentro del SVG mostraria dos tipografias distintas.
+  El logo completo, con texto, vive en miqui-logo.svg.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 50 176 164" width="100%" height="100%">
+  <!-- Espejos retrovisores -->
+  <rect x="44" y="90" width="12" height="30" rx="6" fill="#FF7A00" />
+  <rect x="200" y="90" width="12" height="30" rx="6" fill="#FF7A00" />
+  <rect x="52" y="100" width="16" height="6" fill="#FF7A00" />
+  <rect x="188" y="100" width="16" height="6" fill="#FF7A00" />
+
+  <!-- Ruedas -->
+  <rect x="74" y="180" width="24" height="28" rx="8" fill="#1F2937" />
+  <rect x="158" y="180" width="24" height="28" rx="8" fill="#1F2937" />
+
+  <!-- Cuerpo principal de la micro -->
+  <rect x="64" y="56" width="128" height="136" rx="28" fill="#FF7A00" />
+
+  <!-- Parabrisas -->
+  <rect x="80" y="76" width="96" height="44" rx="12" fill="#FFFFFF" />
+
+  <!-- Focos -->
+  <circle cx="84" cy="160" r="8" fill="#FFFFFF" />
+  <circle cx="172" cy="160" r="8" fill="#FFFFFF" />
+
+  <!-- Placa central -->
+  <rect x="96" y="136" width="64" height="44" rx="8" fill="#FFFFFF" />
+
+  <!-- Letra M -->
+  <path d="M 112 168 L 112 148 L 128 160 L 144 148 L 144 168" fill="none" stroke="#1F2937" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
