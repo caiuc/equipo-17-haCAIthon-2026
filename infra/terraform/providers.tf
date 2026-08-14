@@ -1,11 +1,17 @@
 provider "aws" {
   region = var.aws_region
 
+  # Estos tags viajan a todos los recursos. Hackathon/Temporary/DeleteAfter estan para
+  # que al terminar el evento se pueda auditar por tag que no quedo nada corriendo.
   default_tags {
     tags = {
-      Project   = var.project_name
-      Env       = var.environment
-      ManagedBy = "terraform"
+      Project     = var.project_name
+      Env         = var.environment
+      ManagedBy   = "terraform"
+      Hackathon   = "haCAIthon-2026"
+      Team        = "equipo-17"
+      Temporary   = "true"
+      DeleteAfter = var.delete_after
     }
   }
 }

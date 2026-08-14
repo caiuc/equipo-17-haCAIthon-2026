@@ -7,14 +7,183 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Entidad de ejemplo: reemplazala por el modelo real del proyecto.
-/// Tras editarla: pnpm db:migrate
-model Item {
-  id        String   @id @default(cuid())
-  title     String
-  done      Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum Role {
+  SUPERADMIN
+  COMPANY_ADMIN
+  DRIVER
+  PASSENGER
+}
 
-  @@index([createdAt])
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum DriverStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum DayType {
+  WEEKDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum TripStatus {
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+enum ReportSource {
+  DRIVER
+  PASSENGER
+}
+
+/// Empresa o cooperativa rural. Para la demo se crean pre-aprobadas (ACTIVE).
+model Company {
+  id        String        @id @default(cuid())
+  name      String
+  rut       String?       @unique
+  status    CompanyStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  users  User[]
+  routes Route[]
+  trips  Trip[]
+}
+
+/// Un solo modelo para los cuatro roles. Los campos de chofer (licenseNumber,
+/// driverStatus) van aqui en vez de en un DriverProfile 1:1 para evitar un join
+/// en el camino mas transitado del sistema.
+model User {
+  id            String        @id @default(cuid())
+  email         String        @unique
+  passwordHash  String
+  name          String
+  role          Role
+  companyId     String?
+  licenseNumber String?
+  driverStatus  DriverStatus?
+  /// La empresa crea la cuenta del chofer con una clave temporal.
+  mustChangePassword Boolean  @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trips   Trip[]
+
+  @@index([companyId])
+}
+
+/// Cada sentido es un recorrido propio, tal como los lista el PDF de Bupesa
+/// ("desde Terminal Penaflor" y "desde Terminal San Borja" son tablas distintas).
+model Route {
+  id              String   @id @default(cuid())
+  companyId       String
+  name            String
+  code            String
+  originName      String
+  destinationName String
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  stops     RouteStop[]
+  schedules Schedule[]
+  trips     Trip[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+/// El orden explicito (stopOrder) es lo que permite razonar sobre el avance.
+model RouteStop {
+  id        String @id @default(cuid())
+  routeId   String
+  name      String
+  lat       Float
+  lng       Float
+  stopOrder Int
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, stopOrder])
+  @@index([routeId])
+}
+
+/// Horarios referenciales del PDF: primera y ultima salida por tipo de dia.
+/// Se guardan como "HH:mm" porque es un dato de referencia, no un timestamp.
+model Schedule {
+  id             String  @id @default(cuid())
+  routeId        String
+  dayType        DayType
+  firstDeparture String
+  lastDeparture  String
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, dayType])
+  @@index([routeId])
+}
+
+/// Turno: instancia de un chofer recorriendo una ruta. Se crea ad-hoc cuando el
+/// chofer pulsa "iniciar recorrido". companyId va denormalizado porque el filtro
+/// multitenant es el chequeo mas repetido del sistema.
+model Trip {
+  id        String     @id @default(cuid())
+  routeId   String
+  driverId  String
+  companyId String
+  status    TripStatus @default(IN_TRANSIT)
+  startedAt DateTime   @default(now())
+  endedAt   DateTime?
+
+  route     Route              @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  driver    User               @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  positions Position[]
+  reports   OccupancyReport[]
+
+  @@index([routeId, status])
+  @@index([driverId, status])
+  @@index([companyId, status])
+}
+
+/// Muestreo del recorrido: la ultima posicion vive en memoria y aqui solo baja
+/// una cada POSITION_SAMPLE_INTERVAL_MS. recordedAt es el dato que habilita
+/// todo el calculo de frescura.
+model Position {
+  id         String   @id @default(cuid())
+  tripId     String
+  lat        Float
+  lng        Float
+  speed      Float?
+  heading    Float?
+  recordedAt DateTime
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, recordedAt])
+}
+
+/// Reporte colaborativo de ocupacion. Un voto por reporterKey (deviceId anonimo
+/// o userId), actualizable: la persona puede corregir a "ya no va llena".
+model OccupancyReport {
+  id          String       @id @default(cuid())
+  tripId      String
+  reporterKey String
+  source      ReportSource
+  full        Boolean
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, reporterKey])
+  @@index([tripId, updatedAt])
 }

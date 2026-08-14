@@ -22,11 +22,3 @@ export const updateItemSchema = createItemSchema.partial();
 export type Item = z.infer<typeof itemSchema>;
 export type CreateItemInput = z.input<typeof createItemSchema>;
 export type UpdateItemInput = z.infer<typeof updateItemSchema>;
-
-/** Forma de error que devuelve el API en cualquier fallo. */
-export type ApiError = {
-  error: {
-    message: string;
-    details?: unknown;
-  };
-};

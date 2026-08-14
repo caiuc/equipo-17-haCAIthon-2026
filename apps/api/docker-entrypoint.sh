@@ -6,6 +6,12 @@ set -e
 if [ -n "$DATABASE_URL" ]; then
   echo "Aplicando migraciones de Prisma..."
   ./node_modules/.bin/prisma migrate deploy || echo "AVISO: fallaron las migraciones, se arranca igual."
+
+  # El seed es idempotente (upsert), asi que correrlo en cada despliegue no duplica nada.
+  if [ "$SEED_DEMO_DATA" = "true" ]; then
+    echo "Sembrando datos de demo..."
+    node dist/seed.js || echo "AVISO: fallo el seed, se arranca igual."
+  fi
 fi
 
 exec "$@"

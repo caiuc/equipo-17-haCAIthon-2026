@@ -5,15 +5,28 @@ variable "aws_region" {
 }
 
 variable "project_name" {
-  description = "Prefijo de todos los recursos."
+  description = <<-EOT
+    Prefijo de todos los recursos. Lleva "hackathon" a proposito: quien mire la consola
+    de AWS tiene que darse cuenta al instante de que esto es desechable.
+  EOT
   type        = string
-  default     = "equipo17"
+  default     = "hackathon-equipo17"
 }
 
 variable "environment" {
-  description = "Entorno logico (dev, prod...)."
+  description = "Entorno logico. Junto a project_name forma el prefijo de cada recurso."
   type        = string
-  default     = "dev"
+  default     = "demo"
+}
+
+variable "delete_after" {
+  description = <<-EOT
+    Fecha a partir de la cual esta infra se puede borrar sin preguntar. Va como tag
+    DeleteAfter en todos los recursos, para poder auditar con:
+      aws resourcegroupstaggingapi get-resources --tag-filters Key=Hackathon,Values=haCAIthon-2026
+  EOT
+  type        = string
+  default     = "2026-08-31"
 }
 
 variable "vpc_cidr" {
@@ -59,9 +72,22 @@ variable "api_desired_count" {
 }
 
 variable "cors_origin" {
-  description = "Origen permitido por el API. Tras el primer apply, pon aqui la URL de CloudFront."
+  description = <<-EOT
+    Origenes permitidos por el API, separados por coma. En produccion el front llama a
+    /api relativo a traves de CloudFront, asi que es mismo-origen y CORS no interviene:
+    esto existe para que el equipo pueda levantar Vite en localhost contra esta API.
+  EOT
   type        = string
-  default     = "*"
+  default     = "http://localhost:5173"
+}
+
+variable "seed_demo_data" {
+  description = <<-EOT
+    Si es true, el contenedor corre apps/api/prisma/seed.ts al arrancar. El seed es
+    idempotente (upsert), asi que puede correr en cada despliegue sin duplicar nada.
+  EOT
+  type        = bool
+  default     = true
 }
 
 # --- Base de datos ---

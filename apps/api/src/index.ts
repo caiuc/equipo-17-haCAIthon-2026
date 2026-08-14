@@ -1,6 +1,16 @@
 import { app } from './app.js';
-import { env } from './env.js';
+import { env } from './config/env.js';
 import { prisma } from './lib/prisma.js';
+import { hydrateLiveTrips } from './services/liveStore.js';
+
+// Repuebla las micros en curso antes de aceptar trafico: un reinicio no debe
+// dejarlas invisibles hasta su siguiente ping.
+try {
+  const recovered = await hydrateLiveTrips();
+  if (recovered > 0) console.log(`Turnos activos recuperados: ${recovered}`);
+} catch (error) {
+  console.error('No se pudo recuperar el estado en vivo:', error);
+}
 
 const server = app.listen(env.PORT, () => {
   console.log(`API escuchando en http://localhost:${env.PORT}/api`);

@@ -8,8 +8,20 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.api.repository_url
 }
 
+output "public_api_url" {
+  description = <<-EOT
+    LA URL DEL API. Es la que se le pasa al equipo de frontend y la que responde por HTTPS.
+    El front no necesita configurarla: al servirse desde el mismo CloudFront, llama a /api
+    relativo igual que en desarrollo con el proxy de Vite.
+  EOT
+  value       = "https://${aws_cloudfront_distribution.web.domain_name}/api"
+}
+
 output "api_url" {
-  description = "URL publica del API (usala como VITE_API_URL al construir el front)."
+  description = <<-EOT
+    ALB directo, solo HTTP. Sirve para curl y para mirar logs sin pasar por CloudFront.
+    NO usar desde el navegador: la pagina va por HTTPS y el navegador bloquea la mezcla.
+  EOT
   value       = "http://${aws_lb.api.dns_name}"
 }
 
