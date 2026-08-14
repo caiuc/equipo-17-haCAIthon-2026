@@ -96,6 +96,189 @@ paths:
             text/yaml:
               schema: { type: string }
 
+  /live/buses:
+    get:
+      tags: [Publico]
+      summary: Todas las micros vivas del mapa
+      description: |
+        **El endpoint del mapa.** Devuelve las micros en ruta de TODAS las empresas
+        en una sola respuesta, para que la vista tipo Uber haga un poll cada
+        `LIVE_POLL_INTERVAL_MS` (5s) en vez de una consulta por recorrido.
+
+        Lee del store en memoria y de un catalogo cacheado 60s: su costo en Postgres
+        no crece con la cantidad de micros. Responde `Cache-Control: no-store`.
+
+        `driverName` viene **solo con el nombre de pila**, a diferencia de
+        `/routes/{id}/live`. Este endpoint es publico, sin token y consultable cada
+        pocos segundos: devolver el nombre completo de cada chofer del pais lo
+        convertiria en un padron descargable de datos personales (Ley 19.628).
+
+        Las micros vienen ordenadas por relevancia: primero por frescura y solo
+        despues por distancia. Una micro sin senal que quedo cerca del paradero no
+        es mejor informacion que una en vivo un poco mas lejos.
+
+        Si `truncated` es `true`, se recorto por `limit` y la interfaz debe decir que
+        hay mas micros fuera de la vista en vez de fingir que esas son todas.
+      parameters:
+        - name: bbox
+          in: query
+          required: false
+          description: |
+            Caja del viewport, cuatro numeros separados por coma en el orden
+            **`minLng,minLat,maxLng,maxLat`** — es decir **oeste,sur,este,norte**
+            (orden OGC/GeoJSON: longitud primero, no latitud).
+
+            Es el error mas facil de cometer y el mas dificil de ver: un bbox con
+            lat/lng invertidos no da error de tipos, simplemente devuelve cero
+            micros, y en pantalla eso se lee como "no hay micros en ruta". Por eso
+            el servidor valida el orden en vez de corregirlo en silencio: un bbox
+            invertido (`west >= east` o `south >= north`) responde 400.
+
+            Ojo con las APIs de mapas: `google.maps.LatLngBounds` entrega
+            `{south, west, north, east}` y su `toUrlValue()` devuelve
+            `lat,lng,lat,lng`. Hay que reordenarlo a mano:
+            `[sw.lng(), sw.lat(), ne.lng(), ne.lat()].join(',')`.
+
+            Es opcional: el primer render ocurre antes de que el mapa sepa sus
+            limites, y la lista del bottom sheet las quiere todas.
+          schema: { type: string }
+          example: '-71.2,-33.9,-70.5,-33.3'
+        - name: companyId
+          in: query
+          required: false
+          description: Filtra a una sola empresa. Se combina con los demas filtros.
+          schema: { type: string }
+        - name: routeId
+          in: query
+          required: false
+          description: Filtra a un solo recorrido.
+          schema: { type: string }
+        - name: stopId
+          in: query
+          required: false
+          description: |
+            Paradero de referencia para `distanceMeters`. A diferencia de
+            `/routes/{id}/live`, aqui no necesita pertenecer a ningun recorrido en
+            particular: es solo un punto del mapa. Sin este parametro,
+            `distanceMeters` es `null` en todas las micros.
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          description: |
+            Tope de micros devueltas. El recorte se aplica DESPUES de ordenar por
+            relevancia, asi que lo que se pierde es siempre lo menos util.
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+      responses:
+        '200':
+          description: Micros vivas segun los filtros
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LiveBuses' }
+              examples:
+                dosEmpresas:
+                  summary: Dos micros de empresas distintas, una sin senal
+                  value:
+                    serverTime: '2026-08-14T17:49:09.549Z'
+                    stopId: null
+                    total: 2
+                    truncated: false
+                    buses:
+                      - tripId: cmst8phf70001ijiow2zzn966
+                        routeId: cmst8oyjh000eijaoisgx5yzi
+                        routeCode: VIC-IDA
+                        routeName: Vicuna Corriente
+                        company:
+                          id: cmst8oyj4000aijaowk0v9zqp
+                          slug: bupesa
+                          name: Buses Penaflor S.A.
+                          color: '#1d4ed8'
+                          assetSlug: bupesa
+                        plate: JKLM12
+                        seats: 42
+                        fareAdultClp: 1200
+                        driverName: Luis
+                        position: { lat: -33.6091, lng: -70.8739 }
+                        speed: 60
+                        heading: 70
+                        recordedAt: '2026-08-14T17:49:09.259Z'
+                        ageSeconds: 0
+                        freshness: LIVE
+                        distanceMeters: null
+                        occupancy:
+                          { status: UNKNOWN, source: null, reportCount: 0, updatedAt: null }
+                      - tripId: cmst8phhx0003ijiovykjp6ea
+                        routeId: cmst8oyjh000fijaoisgx5yzj
+                        routeCode: PAI-IDA
+                        routeName: Paine - Hospital
+                        company:
+                          id: cmst8oyj4000bijaowk0v9zqq
+                          slug: munibus-paine
+                          name: MuniBus Paine
+                          color: '#15803d'
+                          assetSlug: paine
+                        plate: null
+                        seats: null
+                        fareAdultClp: 0
+                        driverName: Ana
+                        position: { lat: -33.8155, lng: -70.7412 }
+                        speed: null
+                        heading: null
+                        recordedAt: '2026-08-14T17:46:12.000Z'
+                        ageSeconds: 177
+                        freshness: NO_SIGNAL
+                        distanceMeters: null
+                        occupancy:
+                          { status: UNKNOWN, source: null, reportCount: 0, updatedAt: null }
+        '400':
+          description: |
+            `bbox` mal formado: no son cuatro numeros, esta invertido
+            (`minLng >= maxLng` o `minLat >= maxLat`) o cae fuera del rango
+            geografico.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: El `stopId` no existe
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: |
+            Mas de 600 peticiones por minuto desde la misma IP. El cupo es holgado a
+            proposito: en zona rural media localidad sale por la misma IP del
+            carrier, y un limite estrecho dejaria a un pueblo entero sin mapa.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /companies:
+    get:
+      tags: [Publico]
+      summary: Empresas que operan en la plataforma
+      description: |
+        Fichas publicas de las empresas ACTIVE: el color y el sprite con que se
+        pintan sus micros en el mapa, y el telefono al que llamar.
+
+        El telefono no es un adorno: es la salida cuando no hay ninguna micro
+        transmitiendo. "Llamalos" es mejor respuesta que una pantalla vacia.
+
+        `sourceUrl` y `sourceCheckedAt` dicen de donde salio la ficha y cuando se
+        verifico. El principio rector vale tambien para el dato estatico: una tarifa
+        de hace cuatro anos mostrada sin fecha engana igual que una posicion vieja
+        mostrada como fresca.
+      responses:
+        '200':
+          description: Empresas activas, ordenadas por nombre
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PublicCompany' }
+
   /routes:
     get:
       tags: [Publico]
@@ -1070,10 +1253,24 @@ components:
 
     Health:
       type: object
-      required: [status, db, uptime]
+      required: [status, db, migrations, uptime]
       properties:
         status: { type: string, enum: [ok, degraded] }
-        db: { type: string, enum: [ok, down] }
+        db:
+          type: string
+          enum: [ok, down]
+          description: Resultado de un `SELECT 1`.
+        migrations:
+          type: string
+          enum: [ok, failed, unknown]
+          description: |
+            Un `SELECT 1` prueba que hay conexion, no que el esquema sea el que el
+            cliente Prisma espera. `failed` significa que `_prisma_migrations` tiene
+            filas sin terminar o revertidas: la base responde bien y el API devuelve
+            500 en cada endpoint que toque la tabla afectada. En ese caso el health
+            responde 503 y el ALB deja la tarea fuera de servicio.
+            `unknown` = no hay tabla de migraciones (base recien creada); es ausencia
+            de informacion, no un fallo.
         uptime: { type: number, description: Segundos desde que arranco el proceso }
 
     LatLng:
@@ -1149,18 +1346,124 @@ components:
         token: { type: string, description: JWT valido por 12 horas }
         user: { $ref: '#/components/schemas/PublicUser' }
 
+    # --- Empresas y tarifas ---
+
+    AssetSlug:
+      type: string
+      description: |
+        Sprite de la micro. El cliente lo usa para armar la ruta del dibujo:
+        `/assets/micros/<assetSlug>.png`.
+
+        Es una lista blanca cerrada y no un string libre a proposito: seria una ruta
+        de archivo construida con un dato de la base. La lectura del API es
+        tolerante -- una empresa con un slug que este build no conoce llega como
+        `generico` en vez de romper el mapa entero.
+      enum:
+        [generico, bupesa, talagante, islaval, damir, cobrexpress, paine, munibus, colina]
+
+    CompanyBrief:
+      type: object
+      description: |
+        Lo minimo para identificar y pintar una empresa. Va embebido en cada
+        recorrido y en cada micro del mapa: repetir cuatro campos cortos sale mas
+        barato que obligar al cliente a mantener sincronizado un diccionario de
+        empresas.
+      required: [id, slug, name, color, assetSlug]
+      properties:
+        id: { type: string }
+        slug: { type: string, examples: [bupesa] }
+        name: { type: string, examples: [Buses Penaflor S.A.] }
+        color:
+          type: string
+          pattern: '^#[0-9a-fA-F]{6}$'
+          description: Hex de 6 digitos. Se usa tal cual en el mapa y en la lista.
+          examples: ['#1d4ed8']
+        assetSlug: { $ref: '#/components/schemas/AssetSlug' }
+
+    PublicCompany:
+      allOf:
+        - $ref: '#/components/schemas/CompanyBrief'
+        - type: object
+          required: [kind, phone, website, sourceUrl, sourceCheckedAt, routeCount]
+          properties:
+            kind:
+              type: string
+              enum: [PRIVATE, MUNICIPAL]
+              description: |
+                Privada o municipal. **No determina la tarifa**: gratis es una fila
+                de `Fare` con `amountClp: 0`, no una consecuencia de ser municipal.
+            phone:
+              oneOf: [{ type: string }, { type: 'null' }]
+              description: |
+                La salida cuando no hay ninguna micro transmitiendo. Mostrarlo:
+                "llamalos" es mejor respuesta que una pantalla vacia.
+            website:
+              oneOf: [{ type: string }, { type: 'null' }]
+            sourceUrl:
+              oneOf: [{ type: string }, { type: 'null' }]
+              description: De donde salio la ficha (PDF o sitio de la empresa).
+            sourceCheckedAt:
+              oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+              description: |
+                Cuando se verifico por ultima vez. Mostrarlo junto a la tarifa: el
+                principio rector vale tambien para el dato estatico.
+            routeCount:
+              type: integer
+              minimum: 0
+              description: Recorridos activos que publica. Da contexto sin otra consulta.
+
+    Fare:
+      type: object
+      description: |
+        Tarifa publicada para un tipo de pasajero.
+
+        **`amountClp: 0` significa GRATUITO de verdad; la AUSENCIA de la fila (o un
+        `null` donde el API entrega un solo monto) significa TARIFA NO PUBLICADA.**
+        Son dos hechos distintos y la interfaz tiene que mostrarlos distinto: "Gratis"
+        frente a "Tarifa no publicada". El `?? 0` reflejo del lado del cliente es
+        exactamente la forma de romper esto: hace que la app afirme "Gratis" donde en
+        realidad nadie sabe cuanto cuesta, que es la misma clase de mentira que
+        mostrar una posicion vieja como si fuera fresca.
+
+        En los datos sembrados los dos casos existen de verdad: hay una empresa
+        municipal gratuita (`0`) y varias que no publican tarifa (sin fila).
+      required: [passengerType, amountClp]
+      properties:
+        passengerType:
+          type: string
+          enum: [ADULT, STUDENT, SENIOR]
+        amountClp:
+          type: integer
+          minimum: 0
+          description: |
+            Pesos chilenos, entero: el pasaje no tiene decimales. `0` es gratuito,
+            no es "sin dato".
+          examples: [1200]
+
     # --- Recorridos (vista publica) ---
 
     RouteSummary:
       type: object
-      required: [id, name, code, originName, destinationName, companyName, activeBuses]
+      required: [id, name, code, originName, destinationName, company, fares, activeBuses]
       properties:
         id: { type: string }
         name: { type: string, examples: [Vicuna Corriente] }
         code: { type: string, examples: [VIC-IDA] }
         originName: { type: string, examples: [Terminal Penaflor] }
         destinationName: { type: string, examples: [Terminal San Borja] }
-        companyName: { type: string }
+        company:
+          allOf: [{ $ref: '#/components/schemas/CompanyBrief' }]
+          description: |
+            **Reemplaza al antiguo `companyName`** (string). El mapa es multiempresa
+            y necesita ademas el color con que pintar la micro y el sprite que le
+            corresponde. El nombre esta en `company.name`.
+        fares:
+          type: array
+          description: |
+            De 0 a 3 filas, una por tipo de pasajero. **Una lista vacia significa
+            "la empresa no publica tarifa para este recorrido", que NO es lo mismo
+            que gratis.** Ver la nota de `Fare`.
+          items: { $ref: '#/components/schemas/Fare' }
         activeBuses:
           type: integer
           minimum: 0
@@ -1233,6 +1536,12 @@ components:
       required:
         - tripId
         - routeId
+        - routeCode
+        - routeName
+        - company
+        - plate
+        - seats
+        - fareAdultClp
         - driverName
         - position
         - speed
@@ -1247,7 +1556,45 @@ components:
           type: string
           description: Necesario para reportar la ocupacion de esta micro.
         routeId: { type: string }
-        driverName: { type: string }
+        routeCode:
+          type: string
+          description: |
+            El mapa mezcla recorridos de varias empresas, asi que cada micro declara
+            el suyo y el cliente no necesita cruzarlo con `/routes`.
+          examples: [VIC-IDA]
+        routeName: { type: string, examples: [Vicuna Corriente] }
+        company:
+          allOf: [{ $ref: '#/components/schemas/CompanyBrief' }]
+          description: |
+            Empresa que opera la micro: de aqui salen el color y el sprite.
+            `assetSlug` puede diferir del de la empresa cuando el vehiculo declara
+            el suyo (una empresa puede tener un minibus distinto al resto).
+        plate:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            Patente. `null` cuando el chofer inicio turno sin declarar vehiculo: no
+            se inventa una.
+        seats:
+          oneOf: [{ type: integer, minimum: 1 }, { type: 'null' }]
+          description: Asientos del vehiculo. `null` si no se declaro.
+        fareAdultClp:
+          oneOf: [{ type: integer, minimum: 0 }, { type: 'null' }]
+          description: |
+            Tarifa de adulto en pesos: el numero que el pasajero necesita tener en
+            la mano antes de subirse.
+
+            **`0` significa GRATUITO de verdad y `null` significa TARIFA NO
+            PUBLICADA.** No colapsar los dos casos: un `?? 0` en el cliente hace que
+            la app diga "Gratis" donde en realidad no sabemos cuanto cuesta. Son
+            dos etiquetas distintas en pantalla ("Gratis" / "Tarifa no publicada"),
+            y los dos casos existen en los datos reales.
+        driverName:
+          type: string
+          description: |
+            En `/live/buses` llega **solo el nombre de pila**; en `/routes/{id}/live`
+            llega completo. La diferencia es deliberada: el endpoint del mapa es
+            publico y devuelve todas las micros del pais cada pocos segundos, asi
+            que el nombre completo lo volveria un padron de choferes descargable.
         position: { $ref: '#/components/schemas/LatLng' }
         speed:
           oneOf: [{ type: number }, { type: 'null' }]
@@ -1297,6 +1644,35 @@ components:
           description: |
             true cuando no hay ninguna micro transmitiendo. Mostrar "No hay micros
             en ruta" de forma explicita.
+
+    LiveBuses:
+      type: object
+      description: 'Respuesta de `/live/buses`: el mapa completo en un solo poll.'
+      required: [serverTime, stopId, buses, total, truncated]
+      properties:
+        serverTime:
+          type: string
+          format: date-time
+          description: |
+            Reloj del servidor. Calcular las antiguedades contra este valor y no
+            contra el del dispositivo, que puede estar desajustado.
+        stopId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Paradero de referencia usado para `distanceMeters`, si se paso.
+        buses:
+          type: array
+          description: Ordenadas por frescura primero y por distancia despues.
+          items: { $ref: '#/components/schemas/LiveBus' }
+        total:
+          type: integer
+          minimum: 0
+          description: Cuantas micros vivas habia ANTES de recortar por `limit`.
+        truncated:
+          type: boolean
+          description: |
+            `true` si se recorto por `limit`. La interfaz debe decir que hay mas
+            micros fuera de la vista: mostrar 200 de 340 como si fueran todas es
+            afirmar algo falso sobre el mapa.
 
     PositionInput:
       type: object

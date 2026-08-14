@@ -6,7 +6,14 @@ export default defineConfig({
   // El seed se compila porque la imagen poda las devDependencies y ahi no sobrevive tsx.
   entry: {
     index: 'src/index.ts',
-    seed: 'prisma/seed.ts',
+    // La clave se llama "seed" a proposito: docker-entrypoint.sh corre
+    // dist/seed.js, y tsup nombra el bundle por la clave, no por el archivo.
+    seed: 'prisma/seed/index.ts',
+    // El simulador va en la misma imagen que el API: el servicio ECS
+    // <prefijo>-simulator la reusa con command ["node","dist/simulate.js"].
+    // Sin esta entrada la tarea muere en bucle, y cada reinicio quema cupo del
+    // rate limit de login.
+    simulate: 'tools/simulator/index.ts',
   },
   format: ['esm'],
   target: 'node20',

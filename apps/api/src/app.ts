@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import { corsOrigins } from './config/env.js';
@@ -17,6 +18,15 @@ export const app = express();
 app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
 
 app.use(helmet());
+
+// Gzip antes de las rutas. GET /api/live/buses son ~70 KB de JSON con 200 micros y
+// el mapa lo pide cada LIVE_POLL_INTERVAL_MS: sin comprimir, eso es casi un mega por
+// minuto sobre la red movil rural que este proyecto existe para servir. Comprime ~8:1
+// porque el payload son las mismas claves repetidas 200 veces.
+// No se delega en CloudFront: alli la compresion al vuelo va atada al cacheo, y la
+// behavior /api/* usa CachingDisabled a proposito (cachear posiciones seria mentir).
+app.use(compression());
+
 app.use(cors({ origin: corsOrigins }));
 app.use(express.json({ limit: '256kb' }));
 

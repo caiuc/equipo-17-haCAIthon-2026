@@ -50,6 +50,15 @@ output "ecs_service" {
   value       = aws_ecs_service.api.name
 }
 
+output "ecs_simulator_service" {
+  description = <<-EOT
+    Nombre del servicio ECS del simulador. Arranca apagado (desired_count 0); se
+    enciende a mano antes de la demo:
+      aws ecs update-service --cluster <ecs_cluster> --service <este> --desired-count 1
+  EOT
+  value       = aws_ecs_service.simulator.name
+}
+
 output "db_endpoint" {
   description = "Endpoint de RDS (solo accesible desde la VPC)."
   value       = aws_db_instance.main.address

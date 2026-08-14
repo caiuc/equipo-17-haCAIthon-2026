@@ -40,7 +40,7 @@ function StopPicker({ stops, selectedStopId, onSelectStop }) {
   )
 }
 
-function OutOfServiceState() {
+function OutOfServiceState({ scoped }) {
   const style = outOfServiceStyle()
 
   return (
@@ -52,8 +52,9 @@ function OutOfServiceState() {
         {style.message}
       </p>
       <p className="max-w-[34ch] text-[13px] leading-snug text-[var(--ink-soft)]">
-        Ninguna micro está transmitiendo en este recorrido. No es que no sepamos dónde van: es que
-        no hay ninguna en ruta ahora.
+        {scoped
+          ? "Ninguna micro está transmitiendo en este recorrido. No es que no sepamos dónde van: es que no hay ninguna en ruta ahora."
+          : "Ninguna micro está transmitiendo ahora, de ninguna empresa. No es que no sepamos dónde van: es que no hay ninguna en ruta."}
       </p>
     </div>
   )
@@ -69,24 +70,42 @@ export function RideSheet({
   onSelectBus,
   onReportOccupancy,
   outOfService,
+  elapsedMs = 0,
+  truncated = false,
 }) {
   const [collapsed, setCollapsed] = useState(false)
   const dragStartY = useRef(null)
+  // El navegador dispara `click` despues de un arrastre sobre el mismo boton:
+  // sin esta marca el gesto colapsaba la hoja y el click la volvia a abrir.
+  const dragged = useRef(false)
 
   const sinMicros = outOfService || buses.length === 0
 
-  function handleDragStart(e) {
-    dragStartY.current = e.clientY ?? e.touches?.[0]?.clientY ?? null
+  function handlePointerDown(e) {
+    dragStartY.current = e.clientY
+    dragged.current = false
+    // Con captura el `pointerup` llega aunque el dedo termine fuera del boton.
+    e.currentTarget.setPointerCapture?.(e.pointerId)
   }
 
-  function handleDragEnd(e) {
-    if (dragStartY.current == null) return
-    const endY = e.clientY ?? e.changedTouches?.[0]?.clientY ?? dragStartY.current
-    const delta = endY - dragStartY.current
+  function handlePointerUp(e) {
+    const startY = dragStartY.current
     dragStartY.current = null
+    if (startY == null) return
 
-    if (delta > DRAG_THRESHOLD_PX) setCollapsed(true)
-    else if (delta < -DRAG_THRESHOLD_PX) setCollapsed(false)
+    const delta = e.clientY - startY
+    if (Math.abs(delta) < DRAG_THRESHOLD_PX) return // fue un toque: lo resuelve el click
+
+    dragged.current = true
+    setCollapsed(delta > 0)
+  }
+
+  function handleClick() {
+    if (dragged.current) {
+      dragged.current = false
+      return
+    }
+    setCollapsed((c) => !c)
   }
 
   return (
@@ -97,9 +116,9 @@ export function RideSheet({
     >
       <button
         type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        onPointerDown={handleDragStart}
-        onPointerUp={handleDragEnd}
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
         className="sticky top-0 z-10 flex w-full flex-col items-center gap-1.5 bg-white/95 pt-2.5 pb-1.5 backdrop-blur-xl touch-none"
         aria-label={collapsed ? "Mostrar lista de micros" : "Ver mapa completo"}
       >
@@ -115,24 +134,43 @@ export function RideSheet({
       </button>
 
       <div className="px-4 pb-6">
-        {route && (
-          <div className="px-1 pb-3">
-            <h2 className="text-[17px] font-semibold leading-tight text-[var(--ink)]">
-              {route.name}
-            </h2>
-            <p className="text-[13px] text-[var(--ink-soft)]">
-              {route.code ? `${route.code} · ` : ""}
-              {route.originName} ↔ {route.destinationName}
-            </p>
-          </div>
-        )}
+        <div className="px-1 pb-3">
+          {route ? (
+            <>
+              <h2 className="text-[17px] font-semibold leading-tight text-[var(--ink)]">
+                {route.name}
+              </h2>
+              <p className="text-[13px] text-[var(--ink-soft)]">
+                {route.code ? `${route.code} · ` : ""}
+                {route.originName} ↔ {route.destinationName}
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-[17px] font-semibold leading-tight text-[var(--ink)]">
+                Micros en ruta ahora
+              </h2>
+              <p className="text-[13px] text-[var(--ink-soft)]">
+                Todas las empresas. Busca un recorrido para ver solo el tuyo.
+              </p>
+            </>
+          )}
+        </div>
 
         <StopPicker stops={stops} selectedStopId={selectedStopId} onSelectStop={onSelectStop} />
 
         {sinMicros ? (
-          <OutOfServiceState />
+          <OutOfServiceState scoped={Boolean(route)} />
         ) : (
           <div className="flex flex-col gap-2">
+            {/* Se dice cuando la lista esta recortada: mostrar menos micros de
+                las que hay sin avisarlo tambien es ocultar informacion. */}
+            {truncated && (
+              <p className="px-1 text-[12px] text-[var(--ink-soft)]">
+                Hay más micros en ruta de las que caben en esta lista. Acerca el mapa o busca tu
+                recorrido.
+              </p>
+            )}
             {buses.map((bus) => (
               <MicroCard
                 key={bus.tripId}
@@ -140,6 +178,7 @@ export function RideSheet({
                 selected={bus.tripId === selectedBusId}
                 onSelect={onSelectBus}
                 onReportOccupancy={onReportOccupancy}
+                elapsedMs={elapsedMs}
               />
             ))}
           </div>

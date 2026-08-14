@@ -82,6 +82,20 @@ export const getRoute = (routeId) => request(`/api/routes/${routeId}`)
 export const getRouteLive = (routeId, stopId) =>
   request(`/api/routes/${routeId}/live${stopId ? `?stopId=${encodeURIComponent(stopId)}` : ""}`)
 
+/**
+ * Todas las micros vivas del mapa, de todas las empresas.
+ * `bbox` va en orden OGC: oeste,sur,este,norte. Los filtros vacios no se mandan
+ * — el backend valida `bbox` estricto y un string a medias devolveria 400.
+ */
+export const getLiveBuses = (filters = {}) => {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value != null && value !== "") query.set(key, String(value))
+  }
+  const qs = query.toString()
+  return request(`/api/live/buses${qs ? `?${qs}` : ""}`)
+}
+
 /** Reporte colaborativo de ocupacion. Anonimo: se identifica por dispositivo. */
 export const reportOccupancy = (tripId, full) =>
   request(`/api/trips/${tripId}/occupancy`, {

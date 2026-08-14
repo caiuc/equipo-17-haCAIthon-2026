@@ -3,6 +3,8 @@ import { Link } from "react-router-dom"
 import { ChevronLeft, Loader2, Search, X } from "lucide-react"
 import { MapView } from "@/components/passenger/MapView"
 import { RideSheet } from "@/components/passenger/RideSheet"
+import { useElapsedSince } from "@/hooks/useElapsedSince"
+import { useLiveBuses } from "@/hooks/useLiveBuses"
 import { useLiveRoute } from "@/hooks/useLiveRoute"
 import { useRouteSearch } from "@/hooks/useRouteSearch"
 import { getRoute, reportOccupancy } from "@/lib/api"
@@ -18,10 +20,32 @@ export default function PassengerApp() {
   const [reportError, setReportError] = useState(null)
 
   const { routes, loading: searching, error: searchError } = useRouteSearch(query)
-  const { live, loading: liveLoading, error: liveError, refresh } = useLiveRoute(route?.id ?? null, selectedStopId)
+  const {
+    live,
+    receivedAt: liveReceivedAt,
+    loading: liveLoading,
+    error: liveError,
+    refresh,
+  } = useLiveRoute(route?.id ?? null, selectedStopId)
+
+  // Mientras no hay recorrido elegido el mapa muestra todo lo que se mueve, de
+  // todas las empresas: es la respuesta a "¿hay algo andando?" antes de saber
+  // que recorrido buscar. Al elegir uno, manda la consulta del recorrido.
+  const {
+    buses: mapBuses,
+    truncated,
+    receivedAt: mapReceivedAt,
+    refresh: refreshMap,
+  } = useLiveBuses({ enabled: !route })
 
   const stops = route?.stops ?? []
-  const buses = live?.buses ?? []
+  const buses = route ? (live?.buses ?? []) : mapBuses
+  const outOfService = route ? (live?.outOfService ?? true) : mapBuses.length === 0
+
+  // Envejece lo mostrado entre consultas: si el polling se corta, las micros se
+  // degradan solas a "Señal intermitente" y "Sin señal" en vez de quedarse
+  // congeladas diciendo "En vivo".
+  const elapsedMs = useElapsedSince(route ? liveReceivedAt : mapReceivedAt)
 
   async function selectRoute(routeId) {
     setSearchOpen(false)
@@ -52,12 +76,20 @@ export default function PassengerApp() {
     }
     // Se refresca igual: si el reporte entro, la ocupacion que muestra el
     // servidor es la unica version que vale.
-    refresh()
+    if (route) refresh()
+    else refreshMap()
   }
 
   return (
     <div className="relative h-svh w-full overflow-hidden bg-[var(--mist)]">
-      <MapView buses={buses} stops={stops} selectedBusId={selectedBusId} onSelectBus={setSelectedBusId} />
+      <MapView
+        buses={buses}
+        stops={stops}
+        selectedBusId={selectedBusId}
+        onSelectBus={setSelectedBusId}
+        elapsedMs={elapsedMs}
+        fitKey={route?.id ?? "map"}
+      />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-2 p-4">
         <div className="flex items-center gap-2">
@@ -204,7 +236,9 @@ export default function PassengerApp() {
         selectedBusId={selectedBusId}
         onSelectBus={setSelectedBusId}
         onReportOccupancy={handleReportOccupancy}
-        outOfService={live?.outOfService ?? true}
+        outOfService={outOfService}
+        elapsedMs={elapsedMs}
+        truncated={truncated}
       />
     </div>
   )

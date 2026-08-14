@@ -1,8 +1,10 @@
 import { useState } from "react"
-import { Check, MapPin, User } from "lucide-react"
+import { Check, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import { BusSprite } from "@/components/passenger/BusSprite"
+import { formatFare } from "@/lib/fare"
 import { FRESHNESS, formatDistance, formatOccupancy, getFreshness } from "@/lib/freshness"
 
 const REPORT_CONFIRMATION_MS = 2500
@@ -32,12 +34,32 @@ function OccupancyBadge({ occupancy }) {
   )
 }
 
-export function MicroCard({ bus, selected, onSelect, onReportOccupancy }) {
+/**
+ * Aqui NO va un ETA en minutos. No modelamos subida de pasajeros, paradas a la
+ * sena ni el trazado real del camino: un ETA sobre eso estaria malo, y un ETA
+ * malo genera confianza falsa. Va la distancia en linea recta, o nada cuando el
+ * backend no la entrega — que es justo cuando la posicion ya no la sostiene.
+ */
+function DistanceLine({ distanceMeters, unreliable }) {
+  const distance = formatDistance(distanceMeters)
+  if (distance) return <span className="text-[13px] text-[var(--ink)]">A {distance}</span>
+
+  if (unreliable) {
+    return (
+      <span className="text-[12px] text-[var(--ink-soft)]">
+        Sin distancia: la última posición es muy vieja
+      </span>
+    )
+  }
+  return <span className="text-[12px] text-[var(--ink-soft)]">Elige tu paradero para la distancia</span>
+}
+
+export function MicroCard({ bus, selected, onSelect, onReportOccupancy, elapsedMs = 0 }) {
   const [sending, setSending] = useState(false)
   const [confirmed, setConfirmed] = useState(null)
 
-  const freshness = getFreshness(bus)
-  const distance = formatDistance(bus.distanceMeters)
+  const freshness = getFreshness(bus, elapsedMs)
+  const fare = formatFare(bus.fareAdultClp)
   // Sin señal significa que la posición ya no sostiene una distancia: no se
   // estima nada, se declara la incertidumbre.
   const positionUnreliable = freshness.status === FRESHNESS.NO_SIGNAL
@@ -66,36 +88,65 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy }) {
         className="flex w-full flex-col gap-2 px-3.5 py-3 text-left"
         aria-pressed={selected}
       >
-        {/* Lo primero y más visible: qué tan vieja es esta información. */}
-        <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${freshness.dotClass}`} />
-          <span className="text-[13px] font-semibold" style={{ color: freshness.color }}>
-            {freshness.label}
-          </span>
-        </div>
-        <p className="text-[12px] leading-snug text-[var(--ink-soft)]">{freshness.message}</p>
-
-        <div className="flex items-start gap-2">
-          <MapPin
-            className={`mt-0.5 h-4 w-4 shrink-0 ${positionUnreliable ? "text-[var(--ink-soft)]" : "text-[var(--ink)]"}`}
-            strokeWidth={1.75}
+        <div className="flex items-center gap-3">
+          {/* En la lista el rumbo no aporta: el sprite va derecho. */}
+          <BusSprite
+            assetSlug={bus.company.assetSlug}
+            status={freshness.status}
+            statusLabel={freshness.label}
+            companyColor={bus.company.color}
+            size={44}
+            rotate={false}
           />
-          {distance ? (
-            <p className="text-[18px] font-semibold leading-tight text-[var(--ink)]">
-              A {distance} del paradero
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="shrink-0 text-[15px] font-semibold text-[var(--ink)]">
+                {bus.routeCode}
+              </span>
+              <span className="truncate text-[13px] text-[var(--ink-soft)]">
+                {bus.company.name}
+              </span>
+            </div>
+            <p className="truncate text-[12px] text-[var(--ink-soft)]">{bus.routeName}</p>
+            {bus.seats != null && (
+              <span className="mt-0.5 flex items-center gap-1 text-[12px] text-[var(--ink-soft)]">
+                <Users className="h-3.5 w-3.5" strokeWidth={1.75} />
+                {bus.seats} asientos
+              </span>
+            )}
+          </div>
+
+          <div className="shrink-0 text-right">
+            <p
+              className={
+                fare.tone === "unknown"
+                  ? "text-[12px] text-[var(--ink-soft)]"
+                  : "text-[15px] font-semibold text-[var(--ink)]"
+              }
+            >
+              {fare.label}
             </p>
-          ) : (
-            <p className="text-[13px] leading-snug text-[var(--ink-soft)]">
-              {positionUnreliable
-                ? "No mostramos distancia: la última posición es demasiado vieja para confiar en ella."
-                : "Elige un paradero para ver a qué distancia va."}
-            </p>
-          )}
+            <DistanceLine distanceMeters={bus.distanceMeters} unreliable={positionUnreliable} />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <User className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" strokeWidth={1.75} />
-          <p className="truncate text-[13px] text-[var(--ink)]">{bus.driverName}</p>
+        {/* Nunca un dato sin decir que tan viejo es: el chip y su texto. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="flex items-center gap-1.5 rounded-full bg-[var(--mist)] px-2 py-0.5">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${freshness.dotClass}`} />
+            <span className="text-[12px] font-medium" style={{ color: freshness.color }}>
+              {freshness.label}
+            </span>
+          </span>
+          <span className="text-[12px] text-[var(--ink-soft)]">{freshness.message}</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="truncate text-[12px] text-[var(--ink-soft)]">{bus.driverName}</span>
+          {bus.plate && (
+            <span className="text-[12px] text-[var(--ink-soft)]">· {bus.plate}</span>
+          )}
         </div>
 
         <OccupancyBadge occupancy={bus.occupancy} />

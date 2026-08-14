@@ -96,6 +96,19 @@ resource "aws_lb_listener" "http" {
 
 # --- Tarea y servicio ---
 
+# CORS: VERIFICADO contra el despliegue vivo, y la conclusion es que aqui no hay nada
+# que arreglar. deploy-web.sh hornea VITE_API_URL vacio, asi que el front pide
+# "/api/..." relativo; la pagina se sirve desde el dominio de CloudFront y ese MISMO
+# CloudFront enruta /api/* al ALB como segundo origen (ver frontend.tf). Para el
+# navegador es el mismo origen: no manda cabecera Origin, no hay preflight, y el
+# middleware cors() del API no llega a decidir nada. Si la demo falla, CORS no es la
+# causa y agregar origenes aqui no cambiaria nada.
+#
+# Por eso CORS_ORIGIN se deja tal cual, con var.cors_origin: su unico consumidor real
+# es el camino de desarrollo (Vite en localhost apuntando a esta API desplegada), que
+# si es cross-origin. Se evaluo agregar el dominio de CloudFront automaticamente y se
+# descarto: obliga a una revision nueva de la task definition sobre infra ya aplicada
+# a cambio de cero efecto observable.
 resource "aws_ecs_task_definition" "api" {
   family                   = "${local.name}-api"
   requires_compatibilities = ["FARGATE"]
