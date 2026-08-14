@@ -1,0 +1,11 @@
+@import 'tailwindcss';
+
+/* Tailwind v4: la configuracion vive aqui, no en tailwind.config.js */
+@theme {
+  --color-brand: #ffc72c;
+  --color-brand-dark: #d9a400;
+}
+
+html {
+  color-scheme: light dark;
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+.terraform
+apps/api/prisma/migrations
+
+# Bases oficiales del evento: se dejan tal cual las publico el CAi.
+README.md

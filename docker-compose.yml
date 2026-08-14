@@ -1,0 +1,60 @@
+# Uso diario (recomendado): solo Postgres en Docker, apps nativas con hot reload
+#   pnpm db:up && pnpm db:migrate && pnpm dev
+#
+# Verificar el build de produccion completo:
+#   pnpm docker:full     -> http://localhost:8080
+
+name: equipo17
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-equipo17}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-equipo17}
+      POSTGRES_DB: ${POSTGRES_DB:-equipo17}
+    ports:
+      # 5434 en el host para no chocar con otros Postgres locales.
+      - '${POSTGRES_PORT:-5434}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-equipo17} -d ${POSTGRES_DB:-equipo17}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: [full]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGIN: http://localhost:8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-equipo17}:${POSTGRES_PASSWORD:-equipo17}@db:5432/${POSTGRES_DB:-equipo17}?schema=public
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    profiles: [full]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Vacio: el front llama a /api y nginx lo proxea al servicio `api`.
+        VITE_API_URL: ''
+    restart: unless-stopped
+    ports:
+      - '8080:80'
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

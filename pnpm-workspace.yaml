@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 10 bloquea los postinstall por defecto. Estos si los necesitamos:
+# prisma genera su cliente y esbuild descarga su binario nativo.
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - esbuild
+  - prisma

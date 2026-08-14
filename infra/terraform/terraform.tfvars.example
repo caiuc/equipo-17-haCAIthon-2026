@@ -1,0 +1,13 @@
+# cp terraform.tfvars.example terraform.tfvars
+
+aws_region   = "us-east-1"
+project_name = "equipo17"
+environment  = "dev"
+
+# Tras el primer apply, copia aqui la URL de CloudFront que sale en los outputs
+# y vuelve a aplicar para cerrar CORS:
+# cors_origin = "https://dxxxxxxxxxxxxx.cloudfront.net"
+cors_origin = "*"
+
+# true = tareas ECS en subredes privadas + NAT Gateway (~USD 32/mes extra)
+enable_nat_gateway = false

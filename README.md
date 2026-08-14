@@ -114,3 +114,71 @@ La entrega cierra a las 17:10 hrs, cuando comienza la Feria de Proyectos. La ví
 * Este es un resumen. Las bases oficiales completas, con todas las cláusulas y el detalle de responsabilidad, están disponibles en [este enlace](https://hacaithon.cai.cl/assets/Bases_HaCAithon_2026.pdf).
 
 Consultas: cai@caiuc.cl
+
+---
+---
+
+# PROYECTO · Guía de desarrollo
+
+Monorepo con **pnpm workspaces**: API en Express + Prisma, front en React + Vite, e infraestructura AWS en Terraform.
+
+```
+apps/api        @equipo17/api      Express 5 + Prisma + Postgres      :3000
+apps/web        @equipo17/web      React 19 + Vite + Tailwind v4      :5173
+packages/shared @equipo17/shared   Schemas zod y tipos compartidos
+infra/          Terraform (ECR, ECS Fargate, RDS, S3 + CloudFront)
+```
+
+## Arranque (3 comandos)
+
+```bash
+pnpm install
+cp .env.example .env && cp apps/api/.env.example apps/api/.env
+pnpm db:up && pnpm db:migrate && pnpm dev
+```
+
+* Front: <http://localhost:5173>
+* API: <http://localhost:3000/api/health>
+* Postgres: `localhost:5434` (usuario/clave/base: `equipo17`)
+
+Vite proxea `/api` al backend, así que en desarrollo no hay CORS ni URLs que configurar.
+
+## Comandos
+
+| Comando | Qué hace |
+| --- | --- |
+| `pnpm dev` | Levanta API y web en paralelo con hot reload |
+| `pnpm db:up` / `pnpm db:down` | Postgres en Docker |
+| `pnpm db:migrate` | Crea y aplica una migración de Prisma |
+| `pnpm db:studio` | Explorador visual de la base de datos |
+| `pnpm test` | Tests de API (supertest) y front (Testing Library) |
+| `pnpm lint` · `pnpm format` · `pnpm typecheck` | Calidad de código |
+| `pnpm build` | Build de producción de ambas apps |
+| `pnpm docker:full` | Todo dockerizado en <http://localhost:8080> |
+
+## Cómo agregar una funcionalidad
+
+1. **Modelo** → `apps/api/prisma/schema.prisma`, luego `pnpm db:migrate`.
+2. **Contrato** → schema zod y tipos en `packages/shared/src/`. Los usan API y front.
+3. **Endpoint** → copia `apps/api/src/routes/items.ts` y móntalo en `apps/api/src/app.ts`.
+   Express 5 propaga los errores de handlers `async` al manejador central, así que no
+   hace falta `try/catch`: lanza `HttpError` o deja que falle `schema.parse()`.
+4. **UI** → cliente tipado en `apps/web/src/lib/`, componentes en `apps/web/src/`.
+
+El recurso `Item` existe solo como plantilla end-to-end: bórralo cuando el dominio real esté listo.
+
+## Despliegue en AWS
+
+Ver [`infra/README.md`](infra/README.md). Resumen:
+
+```bash
+cd infra/terraform && terraform init && terraform apply
+../scripts/deploy-api.sh    # imagen -> ECR -> ECS
+../scripts/deploy-web.sh    # build -> S3 -> CloudFront
+```
+
+Cuesta ~USD 40/mes mientras esté arriba: **`terraform destroy` al terminar**.
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE).
