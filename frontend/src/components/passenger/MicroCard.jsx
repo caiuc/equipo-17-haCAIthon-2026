@@ -1,135 +1,148 @@
-import { useState } from "react"
-import { Check, MapPin, User } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { ChevronRight, Users } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
+import { BusSprite } from "@/components/passenger/BusSprite"
+import { OccupancyVote } from "@/components/passenger/OccupancyVote"
+import { formatFare } from "@/lib/fare"
 import { FRESHNESS, formatDistance, formatOccupancy, getFreshness } from "@/lib/freshness"
 
-const REPORT_CONFIRMATION_MS = 2500
+/**
+ * Aqui NO va un ETA en minutos. No modelamos subida de pasajeros, paradas a la
+ * sena ni el trazado real del camino: un ETA sobre eso estaria malo, y un ETA
+ * malo genera confianza falsa. Va la distancia en linea recta, o nada cuando el
+ * backend no la entrega — que es justo cuando la posicion ya no la sostiene.
+ */
+function DistanceLine({ distanceMeters, unreliable }) {
+  const distance = formatDistance(distanceMeters)
+  if (distance) return <span className="text-[13px] text-[var(--ink)]">A {distance}</span>
 
-function OccupancyBadge({ occupancy }) {
-  const shown = formatOccupancy(occupancy)
-
-  if (!shown) {
+  if (unreliable) {
     return (
-      <span className="text-[12px] text-[var(--ink-soft)]">Nadie ha reportado si va llena</span>
+      <span className="text-[12px] text-[var(--ink-soft)]">
+        Sin distancia: la última posición es muy vieja
+      </span>
     )
   }
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Badge
-        className={`rounded-full px-2 py-0 text-[11px] font-medium ${
-          shown.tone === "full"
-            ? "bg-[var(--accent-soft)] text-[var(--accent-deep)]"
-            : "bg-[#e9f7ef] text-[#12784a]"
-        }`}
-      >
-        {shown.label}
-      </Badge>
-      <span className="text-[12px] text-[var(--ink-soft)]">{shown.detail}</span>
-    </div>
-  )
+  return <span className="text-[12px] text-[var(--ink-soft)]">Elige tu paradero para la distancia</span>
 }
 
-export function MicroCard({ bus, selected, onSelect, onReportOccupancy }) {
-  const [sending, setSending] = useState(false)
-  const [confirmed, setConfirmed] = useState(null)
-
-  const freshness = getFreshness(bus)
-  const distance = formatDistance(bus.distanceMeters)
+/**
+ * Una micro en la lista: lo justo para decidir. El detalle completo — empresa,
+ * horarios, tarifas por tipo de pasajero, procedencia del dato — se abre al
+ * tocarla, en `MicroDetailSheet`. Meterlo todo en la tarjeta convertiria la
+ * lista en algo imposible de barrer con el pulgar.
+ */
+export function MicroCard({
+  ref,
+  bus,
+  selected,
+  onSelect,
+  onReportOccupancy,
+  myVote,
+  elapsedMs = 0,
+  showVote = true,
+}) {
+  const freshness = getFreshness(bus, elapsedMs)
+  const fare = formatFare(bus.fareAdultClp)
   // Sin señal significa que la posición ya no sostiene una distancia: no se
   // estima nada, se declara la incertidumbre.
   const positionUnreliable = freshness.status === FRESHNESS.NO_SIGNAL
 
-  async function report(full) {
-    if (sending) return
-    setSending(true)
-    try {
-      await onReportOccupancy?.(bus.tripId, full)
-      setConfirmed(full ? "Reportaste que va llena" : "Reportaste que ya no va llena")
-      setTimeout(() => setConfirmed(null), REPORT_CONFIRMATION_MS)
-    } finally {
-      setSending(false)
-    }
-  }
-
   return (
+    /*
+     * El verde de "seleccionada" NO puede ser el verde de "En vivo" (#1fae5f).
+     * Son dos cosas distintas y el mapa ya usa color para la empresa: si la
+     * seleccion se pintara con el mismo verde, una micro SIN SENAL seleccionada
+     * se leeria como si estuviera transmitiendo. Por eso la seleccion es fondo
+     * verde muy palido con borde verde oscuro — un tono que no aparece en ningun
+     * estado de frescura — y la frescura sigue viviendo en su punto y su texto,
+     * que no cambian de color al seleccionar.
+     */
     <div
-      className={`rounded-2xl border bg-white transition-colors ${
-        selected ? "border-[var(--ink)] shadow-sm" : "border-[var(--line)]"
+      ref={ref}
+      aria-current={selected ? "true" : undefined}
+      className={`rounded-2xl border-2 transition-colors ${
+        selected
+          ? "border-[#0f6b41] bg-[#f0faf4] shadow-sm"
+          : "border-[var(--line)] bg-white"
       }`}
     >
       <button
         type="button"
         onClick={() => onSelect?.(bus.tripId)}
         className="flex w-full flex-col gap-2 px-3.5 py-3 text-left"
-        aria-pressed={selected}
+        aria-label={`Ver detalle de ${bus.routeCode}, ${bus.company.name}`}
       >
-        {/* Lo primero y más visible: qué tan vieja es esta información. */}
-        <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${freshness.dotClass}`} />
-          <span className="text-[13px] font-semibold" style={{ color: freshness.color }}>
-            {freshness.label}
-          </span>
-        </div>
-        <p className="text-[12px] leading-snug text-[var(--ink-soft)]">{freshness.message}</p>
-
-        <div className="flex items-start gap-2">
-          <MapPin
-            className={`mt-0.5 h-4 w-4 shrink-0 ${positionUnreliable ? "text-[var(--ink-soft)]" : "text-[var(--ink)]"}`}
-            strokeWidth={1.75}
+        <div className="flex items-center gap-3">
+          {/* En la lista el rumbo no aporta: el sprite va derecho. */}
+          <BusSprite
+            assetSlug={bus.company.assetSlug}
+            status={freshness.status}
+            statusLabel={freshness.label}
+            size={44}
+            rotate={false}
           />
-          {distance ? (
-            <p className="text-[18px] font-semibold leading-tight text-[var(--ink)]">
-              A {distance} del paradero
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="shrink-0 text-[15px] font-semibold text-[var(--ink)]">
+                {bus.routeCode}
+              </span>
+              <span className="truncate text-[13px] text-[var(--ink-soft)]">
+                {bus.company.name}
+              </span>
+            </div>
+            <p className="truncate text-[12px] text-[var(--ink-soft)]">{bus.routeName}</p>
+            {bus.seats != null && (
+              <span className="mt-0.5 flex items-center gap-1 text-[12px] text-[var(--ink-soft)]">
+                <Users className="h-3.5 w-3.5" strokeWidth={1.75} />
+                {bus.seats} asientos
+              </span>
+            )}
+          </div>
+
+          <div className="shrink-0 text-right">
+            <p
+              className={
+                fare.tone === "unknown"
+                  ? "text-[12px] text-[var(--ink-soft)]"
+                  : "text-[15px] font-semibold text-[var(--ink)]"
+              }
+            >
+              {fare.label}
             </p>
-          ) : (
-            <p className="text-[13px] leading-snug text-[var(--ink-soft)]">
-              {positionUnreliable
-                ? "No mostramos distancia: la última posición es demasiado vieja para confiar en ella."
-                : "Elige un paradero para ver a qué distancia va."}
-            </p>
-          )}
+            <DistanceLine distanceMeters={bus.distanceMeters} unreliable={positionUnreliable} />
+          </div>
+
+          <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" strokeWidth={2} />
         </div>
 
-        <div className="flex items-center gap-2">
-          <User className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" strokeWidth={1.75} />
-          <p className="truncate text-[13px] text-[var(--ink)]">{bus.driverName}</p>
+        {/* Nunca un dato sin decir que tan viejo es: el chip y su texto. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="flex items-center gap-1.5 rounded-full bg-[var(--mist)] px-2 py-0.5">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${freshness.dotClass}`} />
+            <span className="text-[12px] font-medium" style={{ color: freshness.color }}>
+              {freshness.label}
+            </span>
+          </span>
+          <span className="text-[12px] text-[var(--ink-soft)]">{freshness.message}</span>
         </div>
-
-        <OccupancyBadge occupancy={bus.occupancy} />
       </button>
 
-      <Separator className="bg-[var(--line)]" />
-
-      <div className="flex items-center gap-2 px-3.5 py-2.5">
-        {confirmed ? (
-          <p className="flex items-center gap-1.5 text-[12px] font-medium text-[#12784a]">
-            <Check className="h-4 w-4" strokeWidth={2} />
-            {confirmed}
-          </p>
-        ) : (
-          <>
-            <Button
-              variant="outline"
-              onClick={() => report(true)}
-              disabled={sending}
-              className="h-10 flex-1 rounded-xl text-[13px]"
-            >
-              Va llena
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => report(false)}
-              disabled={sending}
-              className="h-10 flex-1 rounded-xl text-[13px]"
-            >
-              Ya no va llena
-            </Button>
-          </>
-        )}
-      </div>
+      {/* Con la ficha abierta los botones de ocupacion ya viven en su seccion:
+          repetirlos aca dejaria dos pares de botones que hacen lo mismo. */}
+      {showVote && (
+        <>
+          <Separator className="bg-[var(--line)]" />
+          <div className="px-3.5 py-2.5">
+            <OccupancyVote
+              occupancy={formatOccupancy(bus.occupancy)}
+              tripId={bus.tripId}
+              myVote={myVote}
+              onReportOccupancy={onReportOccupancy}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }

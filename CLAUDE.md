@@ -60,18 +60,49 @@ simulate`. Con `-- --drop-signal` una micro deja de transmitir a los ~40 s para
 mostrar en vivo la degradacion En vivo → Senal intermitente → Sin senal.
 
 Usuarios del seed (clave `demo1234`): `superadmin@demo.cl`, `admin@bupesa.cl`,
-`chofer1..3@bupesa.cl`, `pasajero@demo.cl`.
+`chofer1..6@<empresa>.cl`, `pasajero@demo.cl`.
+
+**Choferes reservados para personas: `chofer5` y `chofer6` de cada empresa.** El
+simulador usa unicamente `chofer1..4` y esas dos cuentas no las toca nunca. La
+razon no es de estilo: el simulador adopta el turno activo del chofer con el que
+entra y lo cierra al llegar al terminal, asi que si compartiera cuenta con una
+persona que esta usando `/chofer` desde el telefono, un reinicio del servicio le
+cortaria la transmision sin aviso. Para probar la app del chofer, usar
+`chofer5@<empresa>.cl` o `chofer6@<empresa>.cl`. El tope de micros del simulador
+queda en 4 x empresas (32 con las 8 del seed).
 
 ## Superficie del API por rol
 
 | Rol                 | Rutas                                                                                                                                                                      |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Publico (sin token) | `GET /api/routes?q=`, `GET /api/routes/:id`, `GET /api/routes/:id/live?stopId=`, `GET /api/health`                                                                         |
+| Publico (sin token) | `GET /api/live/buses?bbox=&companyId=&routeId=&stopId=&limit=`, `GET /api/companies`, `GET /api/routes?q=`, `GET /api/routes/:id`, `GET /api/routes/:id/live?stopId=`, `GET /api/health`, `GET /api/openapi.yaml` |
 | Cualquiera          | `POST /api/auth/register` (solo pasajeros), `POST /api/auth/login`, `GET /api/auth/me`                                                                                     |
 | Pasajero            | `POST /api/trips/:id/occupancy` (reporte colaborativo)                                                                                                                     |
 | Chofer              | `GET /api/driver/routes`, `POST /api/driver/trips/start`, `POST /api/driver/trips/:id/positions`, `POST /api/driver/trips/:id/end`, `POST /api/driver/trips/:id/occupancy` |
 | Admin de empresa    | `/api/company/routes`, `/api/company/routes/:id/stops`, `/api/company/routes/:id/schedules`, `/api/company/drivers`                                                        |
 | Superadmin          | `/api/admin/companies`                                                                                                                                                     |
+
+`GET /api/live/buses` es el endpoint del mapa: todas las micros vivas de todas las
+empresas en un solo poll. El `bbox` va en orden **`minLng,minLat,maxLng,maxLat`**
+(OGC/GeoJSON, o sea oeste,sur,este,norte). Invertirlo devuelve un mapa vacio sin
+error: por eso se valida en vez de corregir en silencio.
+
+## Escalado: el API corre en UNA sola tarea
+
+`api_desired_count` no puede pasar de 1, y no es prudencia sino una restriccion de la
+arquitectura. La ultima posicion de cada micro vive en un Map en memoria del proceso
+(`src/services/liveStore.ts`). Con dos tareas detras del balanceador, el chofer postea
+a una y el pasajero lee de la otra: **medio mapa desaparece sin ningun error, sin 500
+y sin log**, y se ve igual que "esas micros no estan transmitiendo" — justo la mentira
+que el principio rector prohibe. Las sticky sessions no lo arreglan: pegan a cada
+cliente con una tarea, pero el escritor (telefono del chofer) y el lector (telefono
+del pasajero) son clientes distintos.
+
+Para escalar hay que mover el store fuera del proceso primero (Redis o DynamoDB con
+TTL) y recien despues subir la variable. Hay un `validation` en
+`infra/terraform/variables.tf` que bloquea el `apply` mientras tanto. Ojo con el
+incentivo: el mapa multiempresa hace el fallo mas visible, y ante un mapa con menos
+micros de las esperadas la reaccion natural es "subamos a 2 tareas", que lo empeora.
 
 ## Decisiones de diseno (y por que)
 

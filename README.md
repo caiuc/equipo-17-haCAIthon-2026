@@ -124,7 +124,7 @@ Monorepo con **pnpm workspaces**: API en Express + Prisma, front en React + Vite
 
 ```
 apps/api        @equipo17/api      Express 5 + Prisma + Postgres      :3000
-apps/web        @equipo17/web      React 19 + Vite + Tailwind v4      :5173
+frontend/       @equipo17/web      React 19 + Vite + Tailwind v4      :5173
 packages/shared @equipo17/shared   Schemas zod y tipos compartidos
 infra/          Terraform (ECR, ECS Fargate, RDS, S3 + CloudFront)
 ```
@@ -182,3 +182,50 @@ Cuesta ~USD 40/mes mientras esté arriba: **`terraform destroy` al terminar**.
 ## Licencia
 
 MIT — ver [LICENSE](LICENSE).
+
+## Código y assets de terceros
+
+Declarados según la regla 11 de las bases: *"Se permite código de terceros
+(librerías, APIs, assets) si se declara y se respeta su licencia"*.
+
+### Assets
+
+| Asset | Autor | Licencia | Uso |
+| --- | --- | --- | --- |
+| [Kenney Car Kit 3.1](https://kenney.nl/assets/car-kit) | Kenney | **CC0 1.0** (dominio público) | Modelos `delivery.glb`, `van.glb` y `suv-luxury.glb`, en `apps/api/tools/kenney/`. Los sprites de `frontend/public/assets/micros/` son **obra derivada**: se re-renderizaron a 62° de elevación y se recolorearon por empresa con el script de `tools/render-sprites/`. Licencia original en `frontend/public/assets/micros/LICENSE-kenney.txt`. |
+
+### Código de terceros copiado al repositorio
+
+| Componente | Origen | Licencia |
+| --- | --- | --- |
+| `frontend/src/components/ui/*.jsx` (avatar, badge, button, card, separator, sheet) | [shadcn/ui](https://ui.shadcn.com) | **MIT**. shadcn/ui se distribuye copiando el código al proyecto, no como dependencia: por eso vive en el repositorio y se declara aquí. |
+
+### APIs externas
+
+| API | Proveedor | Uso |
+| --- | --- | --- |
+| [Maps JavaScript API](https://developers.google.com/maps/documentation/javascript) | Google | Mapa del pasajero y marcadores (`AdvancedMarker`). Requiere `VITE_GOOGLE_MAPS_API_KEY` y `VITE_GOOGLE_MAPS_MAP_ID`. |
+
+### Datos
+
+Los recorridos, horarios y tarifas sembrados provienen de las páginas públicas
+de cada empresa; cada una lleva su URL de origen y su fecha de consulta en los
+campos `sourceUrl` y `sourceCheckedAt`. **Donde una empresa no publica un dato,
+no se inventa**: la interfaz declara "por confirmar". Las coordenadas de los
+paraderos son aproximadas salvo las de MuniBus Paine, y así está indicado en el
+propio seed.
+
+### Asistencia de IA
+
+Se usó Claude Code para programar, con la autorización explícita de la regla 11
+de las bases. Los commits generados con su asistencia lo declaran con
+`Co-Authored-By`. Las decisiones de diseño y el criterio del proyecto están
+documentados en [CLAUDE.md](CLAUDE.md).
+
+### Librerías
+
+Las dependencias con su versión exacta están en `pnpm-lock.yaml` y en los
+`package.json` de cada paquete. Las principales: Express, Prisma, zod, bcryptjs,
+jsonwebtoken, helmet y express-rate-limit en el backend; React, Vite, Tailwind
+CSS, `@vis.gl/react-google-maps`, react-router-dom y lucide-react en el
+frontend. Todas bajo licencias permisivas (MIT / Apache-2.0 / ISC).

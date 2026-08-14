@@ -10,6 +10,7 @@ import { Footer } from "@/components/landing/Footer"
 import DashboardPage from "@/pages/DashboardPage"
 import PassengerApp from "@/pages/PassengerApp"
 import CompanyApp from "@/pages/CompanyApp"
+import DriverApp from "@/pages/DriverApp"
 
 function Landing() {
   return (
@@ -28,6 +29,11 @@ function Landing() {
   )
 }
 
+// El BrowserRouter vive AQUI y en ningun otro lado. main.jsx monta <App /> a
+// secas, sin envolverlo: anidar dos Router hace que React Router lance "You
+// cannot render a <Router> inside another <Router>" y la app entera se quede en
+// blanco. Ya paso una vez; si vuelve a aparecer un BrowserRouter en main.jsx,
+// ese es el bug.
 function App() {
   return (
     <BrowserRouter>
@@ -36,6 +42,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/app" element={<PassengerApp />} />
         <Route path="/empresa" element={<CompanyApp />} />
+        <Route path="/chofer" element={<DriverApp />} />
       </Routes>
     </BrowserRouter>
   )

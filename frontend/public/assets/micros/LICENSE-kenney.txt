@@ -1,0 +1,36 @@
+Los sprites de este directorio (generico.png, bupesa.png, talagante.png,
+islaval.png, damir.png, cobrexpress.png, paine.png, munibus.png, colina.png)
+son obras derivadas del Car Kit (3.1) de Kenney: se pre-renderizaron desde los
+modelos delivery.glb, van.glb y suv-luxury.glb a 62 grados de elevacion y se
+les repinto la celda de carroceria del atlas colormap.png.
+
+Fuentes en apps/api/tools/kenney/, generador en tools/render-sprites/.
+
+Texto original de la licencia que acompana al kit:
+
+	Car Kit (3.1)
+
+	Created/distributed by Kenney (www.kenney.nl)
+	Creation date: 02-04-2026 14:03
+
+			------------------------------
+
+	License: (Creative Commons Zero, CC0)
+	http://creativecommons.org/publicdomain/zero/1.0/
+
+	You can use this content for personal, educational, and commercial purposes.
+
+	Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)
+
+			------------------------------
+
+	• Website : www.kenney.nl
+	• Donate  : www.kenney.nl/donate
+
+	• Patreon : patreon.com/kenney
+
+	Follow on social media for updates:
+
+	• Twitter:	 twitter.com/KenneyNL
+	• BlueSky:	 kenney.bsky.social
+	• Instagram: instagram.com/kenney_nl

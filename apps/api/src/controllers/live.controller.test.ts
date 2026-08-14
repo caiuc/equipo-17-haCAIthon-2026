@@ -4,10 +4,11 @@ import request from 'supertest';
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     trip: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
-    route: { findUnique: vi.fn(), findMany: vi.fn() },
+    route: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn() },
     routeStop: { findUnique: vi.fn(), findMany: vi.fn() },
     position: { create: vi.fn() },
     occupancyReport: { findMany: vi.fn() },
+    company: { findMany: vi.fn() },
   },
 }));
 
@@ -16,35 +17,73 @@ vi.mock('../lib/prisma.js', () => ({ prisma: prismaMock }));
 const { app } = await import('../app.js');
 const { signToken } = await import('../lib/jwt.js');
 const { clearLiveTrips, getLiveTrip, upsertLiveTrip } = await import('../services/liveStore.js');
+const { clearCatalogCache } = await import('../services/companyCatalog.service.js');
 
 const ROUTE = { id: 'route-1', name: 'Penaflor - San Borja' };
 const STOP = { routeId: ROUTE.id, lat: -33.6, lng: -70.9 };
 
+/** Lo que devuelve company.findMany para poblar el catalogo cacheado. */
+const BUPESA_CATALOGO = {
+  id: 'company-1',
+  slug: 'bupesa',
+  name: 'Buses Penaflor (Bupesa)',
+  color: '#1B5FC1',
+  assetSlug: 'bupesa',
+  routes: [
+    {
+      id: ROUTE.id,
+      code: 'VIC-IDA',
+      name: ROUTE.name,
+      fares: [{ amountClp: 1350 }],
+    },
+  ],
+};
+
 const driverToken = signToken({ sub: 'driver-1', role: 'DRIVER', companyId: 'company-1' });
 
+type BusOverrides = {
+  tripId?: string;
+  routeId?: string;
+  companyId?: string;
+  lat?: number;
+  lng?: number;
+  busPlate?: string | null;
+  busSeats?: number | null;
+  busAssetSlug?: string | null;
+};
+
 /** Micro a unos cientos de metros del paradero, con la antiguedad que se pida. */
-const putBus = (ageMs: number) => {
+const putBus = (ageMs: number, overrides: BusOverrides = {}) => {
   upsertLiveTrip({
     tripId: 'trip-1',
     routeId: ROUTE.id,
     companyId: 'company-1',
     driverId: 'driver-1',
     driverName: 'Juan Perez',
+    busPlate: null,
+    busSeats: null,
+    busAssetSlug: null,
     lat: -33.605,
     lng: -70.902,
     speed: 42,
     heading: 180,
     recordedAt: new Date(Date.now() - ageMs),
     lastPersistedAt: Date.now(),
+    ...overrides,
   });
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   clearLiveTrips();
+  // Sin esto el segundo test veria las empresas cacheadas por el primero: el
+  // catalogo tiene TTL de un minuto y los tests comparten proceso.
+  clearCatalogCache();
   prismaMock.route.findUnique.mockResolvedValue(ROUTE);
+  prismaMock.route.findFirst.mockResolvedValue(ROUTE);
   prismaMock.routeStop.findUnique.mockResolvedValue(STOP);
   prismaMock.occupancyReport.findMany.mockResolvedValue([]);
+  prismaMock.company.findMany.mockResolvedValue([BUPESA_CATALOGO]);
 });
 
 describe('GET /api/routes/:id/live', () => {
@@ -102,7 +141,7 @@ describe('GET /api/routes/:id/live', () => {
   });
 
   it('404 si el recorrido no existe', async () => {
-    prismaMock.route.findUnique.mockResolvedValue(null);
+    prismaMock.route.findFirst.mockResolvedValue(null);
 
     const res = await request(app).get('/api/routes/no-existe/live');
 

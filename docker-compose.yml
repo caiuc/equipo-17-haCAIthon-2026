@@ -46,10 +46,12 @@ services:
     profiles: [full]
     build:
       context: .
-      dockerfile: apps/web/Dockerfile
+      dockerfile: frontend/Dockerfile
       args:
         # Vacio: el front llama a /api y nginx lo proxea al servicio `api`.
         VITE_API_URL: ''
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-}
+        VITE_GOOGLE_MAPS_MAP_ID: ${VITE_GOOGLE_MAPS_MAP_ID:-}
     restart: unless-stopped
     ports:
       - '8080:80'

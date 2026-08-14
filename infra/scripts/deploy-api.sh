@@ -15,6 +15,34 @@ REGION="$(terraform -chdir="$TF_DIR" output -raw aws_region 2>/dev/null || echo 
 REGISTRY="${ECR_URL%%/*}"
 TAG="${1:-latest}"
 
+# SEED_DEMO_DATA no viaja en este script: quien decide si el contenedor siembra es la
+# variable de entorno de la TASK DEFINITION, que pone Terraform (var.seed_demo_data).
+# Se comprueba aqui porque `SEED_DEMO_DATA=true ./deploy-api.sh` es lo que dice el
+# README y seria una mentira silenciosa si el despliegue arrancara sin sembrar.
+if [ "${SEED_DEMO_DATA:-}" = "true" ]; then
+  TASK_DEF="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+    --region "$REGION" --query 'services[0].taskDefinition' --output text 2>/dev/null || echo "")"
+  SEED_EN_TAREA=""
+  if [ -n "$TASK_DEF" ] && [ "$TASK_DEF" != "None" ]; then
+    SEED_EN_TAREA="$(aws ecs describe-task-definition --task-definition "$TASK_DEF" \
+      --region "$REGION" \
+      --query "taskDefinition.containerDefinitions[0].environment[?name=='SEED_DEMO_DATA'].value | [0]" \
+      --output text 2>/dev/null || echo "")"
+  fi
+
+  if [ "$SEED_EN_TAREA" = "true" ]; then
+    echo "==> SEED_DEMO_DATA=true confirmado en la task definition"
+  else
+    # Aviso, no `exit 1`: si el describe falla por permisos o por red, bloquear el
+    # despliegue seria peor que el problema que se intenta evitar.
+    echo "AVISO: pediste SEED_DEMO_DATA=true, pero la task definition dice"
+    echo "       SEED_DEMO_DATA=${SEED_EN_TAREA:-<no se pudo leer>}. Si es 'false', el contenedor"
+    echo "       NO siembra y el mapa saldra vacio respondiendo 200 en todo. Se corrige con:"
+    echo "         terraform -chdir=infra/terraform apply -var=\"seed_demo_data=true\""
+    echo "       Verificalo despues con: curl -s \"\$(terraform -chdir=infra/terraform output -raw public_api_url)/api/companies\" | jq length"
+  fi
+fi
+
 echo "==> Login en ECR ($REGISTRY)"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 

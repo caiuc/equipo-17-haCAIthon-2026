@@ -2,7 +2,9 @@ import { Router } from 'express';
 import {
   createDriverSchema,
   createRouteSchema,
+  createZoneSchema,
   idParamSchema,
+  regionIdParamSchema,
   replaceStopsSchema,
   updateDriverSchema,
   updateRouteSchema,
@@ -23,6 +25,7 @@ import {
   updateRoute,
   upsertSchedules,
 } from '../controllers/company.controller.js';
+import { createZone, listRegions } from '../controllers/region.controller.js';
 
 /**
  * Todo lo de aqui esta limitado al companyId del token, nunca a uno que venga
@@ -65,3 +68,13 @@ companyRouter.patch(
 );
 
 companyRouter.get('/trips/live', liveTrips);
+
+// Reusa el mismo arbol publico: el panel necesita las mismas regiones/zonas
+// para el selector del RouteForm.
+companyRouter.get('/regions', listRegions);
+companyRouter.post(
+  '/regions/:regionId/zones',
+  validateParams(regionIdParamSchema),
+  validateBody(createZoneSchema),
+  createZone,
+);

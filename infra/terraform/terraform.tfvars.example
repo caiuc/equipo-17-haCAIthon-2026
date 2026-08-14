@@ -7,14 +7,23 @@ environment  = "demo"
 # Fecha desde la cual esta infra se puede borrar. Va como tag DeleteAfter.
 delete_after = "2026-08-31"
 
-# El front se sirve desde el mismo CloudFront que enruta /api/* al ALB, asi que las
-# llamadas son mismo-origen y CORS no interviene. Esto es solo para desarrollo local
-# contra la API desplegada. Tras el primer apply se le puede agregar la URL de CloudFront:
-#   terraform apply -var="cors_origin=$(terraform output -raw web_url),http://localhost:5173"
+# Origenes EXTRA para CORS. El dominio de CloudFront ya NO se pone a mano: ecs.tf lo
+# agrega solo a la variable CORS_ORIGIN de la tarea. Esto queda para el desarrollo
+# local (Vite en localhost) contra la API desplegada.
+# En el camino de produccion CORS no interviene: front y /api salen del mismo origen.
 cors_origin = "http://localhost:5173"
 
-# Siembra los datos de demo (Bupesa) al arrancar el contenedor. Idempotente.
+# Siembra los datos de demo (empresas, recorridos, choferes) al arrancar. Idempotente.
 seed_demo_data = true
 
 # true = tareas ECS en subredes privadas + NAT Gateway (~USD 32/mes extra)
 enable_nat_gateway = false
+
+# NO subir de 1: el store de posiciones vive en memoria del proceso y con 2 tareas el
+# mapa pierde micros sin dar ningun error. Hay un validation que lo impide.
+api_desired_count = 1
+
+# Simulador apagado por defecto. Se enciende a mano justo antes de la demo con
+# `aws ecs update-service --desired-count 1` (ver infra/README.md).
+simulator_desired_count = 0
+# simulator_buses = "16"

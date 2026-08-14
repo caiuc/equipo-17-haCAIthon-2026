@@ -4,5 +4,5 @@
     "lib": ["ES2023"],
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "tsup.config.ts", "vitest.config.ts"]
+  "include": ["src", "tools", "prisma", "tsup.config.ts", "vitest.config.ts"]
 }

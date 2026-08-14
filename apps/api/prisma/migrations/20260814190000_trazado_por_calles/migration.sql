@@ -1,0 +1,22 @@
+-- Trazado real del recorrido por las calles, para que la micro deje de cruzar
+-- cerros, campos y el rio en linea recta entre paraderos.
+--
+-- Escrita a mano igual que 20260814180000, y por un motivo parecido: el
+-- timestamp del directorio lo pone la maquina de quien corra `migrate dev`, y
+-- aqui tiene que quedar DESPUES de esa. Ademas docker-entrypoint.sh mata la
+-- tarea si `migrate deploy` falla, asi que no hay segunda oportunidad.
+--
+-- El formato es el encoded polyline de Google (el mismo que devuelve la Routes
+-- API y que consume google.maps.geometry.encoding.decodePath). Se guarda la
+-- cadena codificada y no una tabla de puntos porque son ~1-6 KB por recorrido
+-- contra unas mil filas, y nadie consulta un vertice suelto: se lee entero o no
+-- se lee.
+--
+-- NULLABLE a proposito, y no es solo por las filas que ya existen. Es un dato de
+-- CONVENIENCIA: lo calcula un script contra una API que cobra por llamada, y un
+-- recorrido sin trazado tiene que seguir funcionando cayendo a la interpolacion
+-- entre paraderos. Nada que responda "¿viene o no viene?" depende de esta
+-- columna.
+
+-- AlterTable
+ALTER TABLE "Route" ADD COLUMN     "pathPolyline" TEXT;

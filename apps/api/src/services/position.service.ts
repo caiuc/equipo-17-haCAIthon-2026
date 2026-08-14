@@ -62,6 +62,11 @@ export const recordPositions = async (params: {
       driverId: true,
       status: true,
       driver: { select: { name: true } },
+      // Sale gratis en la consulta que este camino ya hacia. Todo lo demas que
+      // el mapa necesita (empresa, color, tarifa) vive en companyCatalog, que se
+      // cachea: meterlo aca encareceria el ping del chofer, que corre cada
+      // cuatro segundos por micro.
+      bus: { select: { plate: true, seats: true, assetSlug: true } },
     },
   });
 
@@ -85,6 +90,9 @@ export const recordPositions = async (params: {
     companyId: trip.companyId,
     driverId: trip.driverId,
     driverName: trip.driver.name,
+    busPlate: trip.bus?.plate ?? null,
+    busSeats: trip.bus?.seats ?? null,
+    busAssetSlug: trip.bus?.assetSlug ?? null,
     lat: last.lat,
     lng: last.lng,
     speed: last.speed,

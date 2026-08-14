@@ -18,13 +18,34 @@ vi.mock('../lib/prisma.js', () => ({ prisma: prismaMock }));
 
 const { app } = await import('../app.js');
 
+const BUPESA = {
+  id: 'co_bupesa',
+  slug: 'bupesa',
+  name: 'Buses Penaflor (Bupesa)',
+  color: '#1B5FC1',
+  assetSlug: 'bupesa',
+};
+
 const vicunaIda = {
   id: 'rt_vic_ida',
   name: 'Vicuna Corriente',
   code: 'VIC-IDA',
   originName: 'Terminal Penaflor',
   destinationName: 'Terminal San Borja',
-  company: { name: 'Buses Penaflor (Bupesa)' },
+  company: BUPESA,
+  fares: [
+    { passengerType: 'ADULT' as const, amountClp: 1350 },
+    { passengerType: 'SENIOR' as const, amountClp: 650 },
+    { passengerType: 'STUDENT' as const, amountClp: 400 },
+  ],
+};
+
+/** Recorrido cuya empresa no publico tarifa: el caso "por confirmar". */
+const sinTarifa = {
+  ...vicunaIda,
+  id: 'rt_sin_tarifa',
+  code: 'STR-IDA',
+  fares: [],
 };
 
 describe('GET /api/routes', () => {
@@ -71,6 +92,17 @@ describe('GET /api/routes', () => {
     );
   });
 
+  it('un recorrido sin tarifa publicada llega con fares vacio', async () => {
+    prismaMock.route.findMany.mockResolvedValue([sinTarifa]);
+
+    const res = await request(app).get('/api/routes');
+
+    expect(res.status).toBe(200);
+    // La lista vacia se pasa tal cual: rellenarla con un 0 le diria al pasajero
+    // que el viaje es gratis, cuando lo unico cierto es que no hay dato.
+    expect(res.body[0].fares).toEqual([]);
+  });
+
   it('sin resultados devuelve un array vacio, no un 404', async () => {
     prismaMock.route.findMany.mockResolvedValue([]);
 
@@ -80,6 +112,51 @@ describe('GET /api/routes', () => {
     expect(res.body).toEqual([]);
     // Sin recorridos no hay nada que contar: no se golpea Trip.
     expect(prismaMock.trip.groupBy).not.toHaveBeenCalled();
+  });
+
+  it('filtra por multiples companyId con OR entre empresas', async () => {
+    prismaMock.route.findMany.mockResolvedValue([vicunaIda]);
+
+    const res = await request(app)
+      .get('/api/routes')
+      .query('companyId=co_bupesa&companyId=co_otra');
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.route.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyId: { in: ['co_bupesa', 'co_otra'] } }),
+      }),
+    );
+  });
+
+  it('filtra por zoneId, combinado con q', async () => {
+    prismaMock.route.findMany.mockResolvedValue([vicunaIda]);
+
+    await request(app).get('/api/routes').query({ q: 'vicuna', zoneId: 'zn_penaflor' });
+
+    expect(prismaMock.route.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ zoneId: 'zn_penaflor' }),
+      }),
+    );
+  });
+
+  it('un recorrido con zona llega con el campo zone poblado', async () => {
+    prismaMock.route.findMany.mockResolvedValue([
+      { ...vicunaIda, zone: { id: 'zn_penaflor', name: 'Peñaflor' } },
+    ]);
+
+    const res = await request(app).get('/api/routes');
+
+    expect(res.body[0].zone).toEqual({ id: 'zn_penaflor', name: 'Peñaflor' });
+  });
+
+  it('un recorrido sin zona asignada llega con zone null, nunca inventada', async () => {
+    prismaMock.route.findMany.mockResolvedValue([{ ...vicunaIda, zone: null }]);
+
+    const res = await request(app).get('/api/routes');
+
+    expect(res.body[0].zone).toBeNull();
   });
 });
 
@@ -108,7 +185,10 @@ describe('GET /api/routes/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.stops.map((s: { stopOrder: number }) => s.stopOrder)).toEqual([0, 1, 2]);
     expect(res.body.schedules).toHaveLength(2);
-    expect(res.body.companyName).toBe('Buses Penaflor (Bupesa)');
+    expect(res.body.company.name).toBe('Buses Penaflor (Bupesa)');
+    // El mapa pinta la micro con estos dos: si faltan, el marcador queda mudo.
+    expect(res.body.company.color).toBe('#1B5FC1');
+    expect(res.body.company.assetSlug).toBe('bupesa');
     // El orden lo impone la consulta, no el cliente.
     expect(prismaMock.route.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

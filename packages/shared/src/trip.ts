@@ -3,7 +3,21 @@ import { tripStatusSchema } from './common.js';
 
 export const startTripSchema = z.object({
   routeId: z.string().min(1),
+  /**
+   * Opcional a proposito: la empresa puede no haber cargado su flota todavia, y
+   * un turno que no se puede iniciar por eso seria peor que un turno sin patente.
+   * Cuando falta, el mapa cae al sprite de la empresa y no inventa un vehiculo.
+   */
+  busId: z.string().min(1).optional(),
 });
+
+export const busSchema = z.object({
+  id: z.string(),
+  plate: z.string(),
+  seats: z.number().int().positive().nullable(),
+  active: z.boolean(),
+});
+export type Bus = z.infer<typeof busSchema>;
 
 export const tripSchema = z.object({
   id: z.string(),
