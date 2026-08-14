@@ -9,6 +9,7 @@ import {
 import { validateParams, validateQuery } from '../middlewares/validate.js';
 import { getRoute, listCompanies, searchRoutes } from '../controllers/public.controller.js';
 import { getLiveBuses, getRouteLive } from '../controllers/live.controller.js';
+import { listRegions } from '../controllers/region.controller.js';
 
 /**
  * Todo esto va sin token: el caso de uso real es alguien parado en un paradero
@@ -31,6 +32,7 @@ const mapaLimiter = rateLimit({
 });
 
 publicRouter.get('/companies', listCompanies);
+publicRouter.get('/regions', listRegions);
 
 publicRouter.get('/live/buses', mapaLimiter, validateQuery(liveBusesQuerySchema), getLiveBuses);
 

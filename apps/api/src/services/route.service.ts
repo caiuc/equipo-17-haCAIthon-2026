@@ -19,7 +19,15 @@ export type ScheduleInput = {
 const routeInclude = {
   stops: { orderBy: { stopOrder: 'asc' } },
   schedules: { orderBy: { dayType: 'asc' } },
+  zone: true,
 } as const;
+
+/** 400 explicito: mejor que un Route apuntando a una zona fantasma. */
+const assertZoneExists = async (zoneId: string | null | undefined): Promise<void> => {
+  if (zoneId == null) return;
+  const zone = await prisma.zone.findUnique({ where: { id: zoneId }, select: { id: true } });
+  if (!zone) throw new HttpError(400, 'La zona indicada no existe');
+};
 
 /**
  * Aislamiento multitenant: todas estas funciones reciben el companyId del token
@@ -55,6 +63,7 @@ export const createRoute = async (companyId: string, input: CreateRouteInput) =>
     select: { id: true },
   });
   if (clash) throw new HttpError(409, 'Ya existe un recorrido con ese codigo en la empresa');
+  await assertZoneExists(input.zoneId);
 
   return prisma.route.create({
     data: {
@@ -64,6 +73,7 @@ export const createRoute = async (companyId: string, input: CreateRouteInput) =>
       originName: input.originName,
       destinationName: input.destinationName,
       active: input.active ?? true,
+      zoneId: input.zoneId ?? null,
     },
     include: routeInclude,
   });
@@ -79,6 +89,7 @@ export const updateRoute = async (companyId: string, id: string, input: UpdateRo
     });
     if (clash) throw new HttpError(409, 'Ya existe un recorrido con ese codigo en la empresa');
   }
+  if (input.zoneId !== undefined) await assertZoneExists(input.zoneId);
 
   return prisma.route.update({ where: { id }, data: input, include: routeInclude });
 };

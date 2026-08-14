@@ -30,6 +30,7 @@ const { prismaMock } = vi.hoisted(() => ({
       findMany: vi.fn(),
     },
     trip: { findMany: vi.fn() },
+    zone: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -122,6 +123,44 @@ describe('recorridos', () => {
       }),
     ).expect(409);
 
+    expect(prismaMock.route.create).not.toHaveBeenCalled();
+  });
+
+  it('acepta zoneId cuando la zona existe y la manda a route.create', async () => {
+    prismaMock.route.findFirst.mockResolvedValue(null);
+    prismaMock.zone.findUnique.mockResolvedValue({ id: 'z1' });
+    prismaMock.route.create.mockResolvedValue({ id: 'r1', code: 'P-01' });
+
+    await asAdmin(
+      request(app).post('/api/company/routes').send({
+        name: 'Penaflor - Santiago',
+        code: 'P-01',
+        originName: 'Terminal Penaflor',
+        destinationName: 'Terminal San Borja',
+        zoneId: 'z1',
+      }),
+    ).expect(201);
+
+    expect(prismaMock.route.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ zoneId: 'z1' }) }),
+    );
+  });
+
+  it('rechaza con 400 una zoneId que no existe, sin crear el Route', async () => {
+    prismaMock.route.findFirst.mockResolvedValue(null);
+    prismaMock.zone.findUnique.mockResolvedValue(null);
+
+    const res = await asAdmin(
+      request(app).post('/api/company/routes').send({
+        name: 'Penaflor - Santiago',
+        code: 'P-01',
+        originName: 'Terminal Penaflor',
+        destinationName: 'Terminal San Borja',
+        zoneId: 'z-fantasma',
+      }),
+    ).expect(400);
+
+    expect(res.body.error.message).toMatch(/zona/i);
     expect(prismaMock.route.create).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@ export * from './constants.js';
 export * from './common.js';
 export * from './auth.js';
 export * from './company.js';
+export * from './region.js';
 export * from './fare.js';
 export * from './vehicle.js';
 export * from './route.js';

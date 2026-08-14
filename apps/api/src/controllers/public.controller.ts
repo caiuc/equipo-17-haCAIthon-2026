@@ -6,8 +6,12 @@ import * as publicRoutes from '../services/publicRoute.service.js';
 
 export const searchRoutes: RequestHandler = async (_req, res) => {
   // Lo que dejo validateQuery(searchRoutesQuerySchema) en res.locals.
-  const { q } = validatedQuery<{ q?: string }>(res);
-  res.json(await publicRoutes.searchRoutes(q));
+  const { q, companyId, zoneId } = validatedQuery<{
+    q?: string;
+    companyId?: string[];
+    zoneId?: string;
+  }>(res);
+  res.json(await publicRoutes.searchRoutes({ q, companyId, zoneId }));
 };
 
 export const getRoute: RequestHandler = async (_req, res) => {

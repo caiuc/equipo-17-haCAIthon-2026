@@ -17,6 +17,7 @@ import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../../src/lib/password.js';
 import { BANNER } from './banner.js';
 import { COMPANIES, DEMO_PASSWORD, PASAJERO, SUPERADMIN } from './data/index.js';
+import { REGIONS_SEED } from './data/regions.js';
 import type { CompanySeed } from './types.js';
 
 const prisma = new PrismaClient();
@@ -24,7 +25,64 @@ const prisma = new PrismaClient();
 /** El slug de la empresa es tambien el dominio de correo de sus cuentas. */
 const adminEmail = (slug: string): string => `admin@${slug}.cl`;
 
-const sembrarEmpresa = async (seed: CompanySeed, passwordHash: string): Promise<void> => {
+/** minusculas y sin tildes, para comparar "Peñaflor" con "PEÑAFLOR" o "penaflor". */
+const normalizar = (texto: string): string =>
+  texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+
+/**
+ * Siembra el arbol region -> zona y devuelve un indice needle->zona para
+ * asignar automaticamente la zona de cada recorrido sembrado, sin tener que
+ * declarar `zoneId` a mano en cada uno de los recorridos de las 8 empresas.
+ */
+const sembrarRegiones = async (): Promise<{ needle: string; zoneId: string }[]> => {
+  const indice: { needle: string; zoneId: string }[] = [];
+
+  for (const regionSeed of REGIONS_SEED) {
+    const region = await prisma.region.upsert({
+      where: { name: regionSeed.name },
+      update: {},
+      create: { name: regionSeed.name },
+    });
+
+    for (const zonaSeed of regionSeed.zones) {
+      const zone = await prisma.zone.upsert({
+        where: { regionId_name: { regionId: region.id, name: zonaSeed.name } },
+        update: {},
+        create: { regionId: region.id, name: zonaSeed.name },
+      });
+
+      for (const needle of [zonaSeed.name, ...zonaSeed.aliases]) {
+        indice.push({ needle: normalizar(needle), zoneId: zone.id });
+      }
+    }
+  }
+
+  // Needles largos primero: "Terminal San Borja" debe ganarle a un needle
+  // corto que por casualidad tambien calce como substring.
+  return indice.sort((a, b) => b.needle.length - a.needle.length);
+};
+
+/** Zona pendiente si ningun needle calza: nunca se inventa una. */
+const matchZone = (
+  indice: { needle: string; zoneId: string }[],
+  ...textos: string[]
+): string | null => {
+  for (const texto of textos) {
+    const normalizado = normalizar(texto);
+    const match = indice.find((entry) => normalizado.includes(entry.needle));
+    if (match) return match.zoneId;
+  }
+  return null;
+};
+
+const sembrarEmpresa = async (
+  seed: CompanySeed,
+  passwordHash: string,
+  indiceZonas: { needle: string; zoneId: string }[],
+): Promise<void> => {
   const ficha = {
     name: seed.name,
     rut: seed.rut,
@@ -89,6 +147,8 @@ const sembrarEmpresa = async (seed: CompanySeed, passwordHash: string): Promise<
       originName: routeSeed.originName,
       destinationName: routeSeed.destinationName,
       active: true,
+      // Pendiente (null) si ningun needle calza: nunca se inventa una zona.
+      zoneId: matchZone(indiceZonas, routeSeed.originName, routeSeed.destinationName),
     };
     const route = await prisma.route.upsert({
       where: { companyId_code: { companyId: company.id, code: routeSeed.code } },
@@ -121,6 +181,7 @@ const sembrarEmpresa = async (seed: CompanySeed, passwordHash: string): Promise<
 
 const main = async (): Promise<void> => {
   const passwordHash = await hashPassword(DEMO_PASSWORD);
+  const indiceZonas = await sembrarRegiones();
 
   for (const cuenta of [
     { ...SUPERADMIN, role: 'SUPERADMIN' as const },
@@ -141,7 +202,7 @@ const main = async (): Promise<void> => {
     });
   }
 
-  for (const seed of COMPANIES) await sembrarEmpresa(seed, passwordHash);
+  for (const seed of COMPANIES) await sembrarEmpresa(seed, passwordHash, indiceZonas);
 
   const suma = (fn: (empresa: CompanySeed) => number): number =>
     COMPANIES.reduce((acc, empresa) => acc + fn(empresa), 0);

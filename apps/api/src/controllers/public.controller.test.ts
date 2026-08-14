@@ -113,6 +113,51 @@ describe('GET /api/routes', () => {
     // Sin recorridos no hay nada que contar: no se golpea Trip.
     expect(prismaMock.trip.groupBy).not.toHaveBeenCalled();
   });
+
+  it('filtra por multiples companyId con OR entre empresas', async () => {
+    prismaMock.route.findMany.mockResolvedValue([vicunaIda]);
+
+    const res = await request(app)
+      .get('/api/routes')
+      .query('companyId=co_bupesa&companyId=co_otra');
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.route.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ companyId: { in: ['co_bupesa', 'co_otra'] } }),
+      }),
+    );
+  });
+
+  it('filtra por zoneId, combinado con q', async () => {
+    prismaMock.route.findMany.mockResolvedValue([vicunaIda]);
+
+    await request(app).get('/api/routes').query({ q: 'vicuna', zoneId: 'zn_penaflor' });
+
+    expect(prismaMock.route.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ zoneId: 'zn_penaflor' }),
+      }),
+    );
+  });
+
+  it('un recorrido con zona llega con el campo zone poblado', async () => {
+    prismaMock.route.findMany.mockResolvedValue([
+      { ...vicunaIda, zone: { id: 'zn_penaflor', name: 'Peñaflor' } },
+    ]);
+
+    const res = await request(app).get('/api/routes');
+
+    expect(res.body[0].zone).toEqual({ id: 'zn_penaflor', name: 'Peñaflor' });
+  });
+
+  it('un recorrido sin zona asignada llega con zone null, nunca inventada', async () => {
+    prismaMock.route.findMany.mockResolvedValue([{ ...vicunaIda, zone: null }]);
+
+    const res = await request(app).get('/api/routes');
+
+    expect(res.body[0].zone).toBeNull();
+  });
 });
 
 describe('GET /api/routes/:id', () => {
