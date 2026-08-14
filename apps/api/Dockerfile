@@ -39,6 +39,8 @@ COPY --from=build /repo/apps/api/node_modules ./apps/api/node_modules
 COPY --from=build /repo/apps/api/package.json ./apps/api/package.json
 COPY --from=build /repo/apps/api/dist ./apps/api/dist
 COPY --from=build /repo/apps/api/prisma ./apps/api/prisma
+# El contrato se sirve en GET /api/openapi.yaml, asi que viaja con la imagen.
+COPY --from=build /repo/apps/api/openapi.yaml ./apps/api/openapi.yaml
 COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
