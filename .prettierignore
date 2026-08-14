@@ -7,3 +7,8 @@ apps/api/prisma/migrations
 
 # Bases oficiales del evento: se dejan tal cual las publico el CAi.
 README.md
+
+# El frontend tiene su propio estilo (sin punto y coma) y su propio linter
+# (oxlint). Reformatearlo desde aqui solo generaria conflictos con quien lo
+# este editando. El lint de ESLint si lo cubre, por los globales del navegador.
+frontend/

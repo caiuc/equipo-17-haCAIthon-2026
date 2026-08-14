@@ -1,6 +1,14 @@
 # deps
 node_modules/
 .pnpm-store/
+frontend/node_modules/
+frontend/.yarn/*
+!frontend/.yarn/patches
+!frontend/.yarn/plugins
+!frontend/.yarn/releases
+!frontend/.yarn/sdks
+!frontend/.yarn/versions
+frontend/.pnp.*
 
 # builds
 dist/
@@ -9,6 +17,7 @@ build/
 
 # env
 .env
+*.env
 .env.local
 .env.*.local
 
