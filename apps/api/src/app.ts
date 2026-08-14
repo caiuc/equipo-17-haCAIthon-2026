@@ -11,8 +11,10 @@ import { errorHandler, notFound } from './middlewares/error.js';
  */
 export const app = express();
 
-// Detras del ALB: necesario para que el rate limit vea la IP real del cliente.
-app.set('trust proxy', 1);
+// Cuantos proxies hay delante, para que el rate limit vea la IP real del cliente y no
+// la del ultimo salto. En local 0, detras del ALB 1, detras de CloudFront + ALB 2: si
+// se queda corto, todos los usuarios comparten el cupo de una misma IP de borde.
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
 
 app.use(helmet());
 app.use(cors({ origin: corsOrigins }));

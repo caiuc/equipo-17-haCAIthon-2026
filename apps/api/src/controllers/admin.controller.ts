@@ -1,12 +1,31 @@
 import type { RequestHandler } from 'express';
-import { HttpError } from '../middlewares/error.js';
+import { z } from 'zod';
+import type { createCompanySchema, idParamSchema, updateCompanySchema } from '@equipo17/shared';
+import { validatedBody, validatedParams } from '../middlewares/validate.js';
+import * as adminService from '../services/admin.service.js';
 
-// STUB: lo implementa el agente responsable de esta area.
-const notImplemented: RequestHandler = () => {
-  throw new HttpError(501, 'No implementado');
+type IdParam = z.infer<typeof idParamSchema>;
+
+export const listCompanies: RequestHandler = async (_req, res) => {
+  res.json(await adminService.listCompanies());
 };
 
-export const listCompanies: RequestHandler = notImplemented;
-export const createCompany: RequestHandler = notImplemented;
-export const updateCompany: RequestHandler = notImplemented;
-export const metrics: RequestHandler = notImplemented;
+export const createCompany: RequestHandler = async (req, res) => {
+  const created = await adminService.createCompany(
+    validatedBody<z.infer<typeof createCompanySchema>>(req),
+  );
+  res.status(201).json(created);
+};
+
+export const updateCompany: RequestHandler = async (req, res) => {
+  const { id } = validatedParams<IdParam>(res);
+  const updated = await adminService.updateCompany(
+    id,
+    validatedBody<z.infer<typeof updateCompanySchema>>(req),
+  );
+  res.json(updated);
+};
+
+export const metrics: RequestHandler = async (_req, res) => {
+  res.json(await adminService.metrics());
+};

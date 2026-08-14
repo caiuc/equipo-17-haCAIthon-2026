@@ -1,10 +1,16 @@
 import type { RequestHandler } from 'express';
-import { HttpError } from '../middlewares/error.js';
+import { validatedParams, validatedQuery } from '../middlewares/validate.js';
+import * as publicRoutes from '../services/publicRoute.service.js';
 
-// STUB: lo implementa el agente responsable de esta area.
-const notImplemented: RequestHandler = () => {
-  throw new HttpError(501, 'No implementado');
+// Express 5 propaga solo los errores de un handler async: nada de try/catch.
+
+export const searchRoutes: RequestHandler = async (_req, res) => {
+  // Lo que dejo validateQuery(searchRoutesQuerySchema) en res.locals.
+  const { q } = validatedQuery<{ q?: string }>(res);
+  res.json(await publicRoutes.searchRoutes(q));
 };
 
-export const searchRoutes: RequestHandler = notImplemented;
-export const getRoute: RequestHandler = notImplemented;
+export const getRoute: RequestHandler = async (_req, res) => {
+  const { id } = validatedParams<{ id: string }>(res);
+  res.json(await publicRoutes.getRouteDetail(id));
+};

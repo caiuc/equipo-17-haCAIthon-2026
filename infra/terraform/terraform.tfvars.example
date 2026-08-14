@@ -1,13 +1,20 @@
 # cp terraform.tfvars.example terraform.tfvars
 
 aws_region   = "us-east-1"
-project_name = "equipo17"
-environment  = "dev"
+project_name = "hackathon-equipo17"
+environment  = "demo"
 
-# Tras el primer apply, copia aqui la URL de CloudFront que sale en los outputs
-# y vuelve a aplicar para cerrar CORS:
-# cors_origin = "https://dxxxxxxxxxxxxx.cloudfront.net"
-cors_origin = "*"
+# Fecha desde la cual esta infra se puede borrar. Va como tag DeleteAfter.
+delete_after = "2026-08-31"
+
+# El front se sirve desde el mismo CloudFront que enruta /api/* al ALB, asi que las
+# llamadas son mismo-origen y CORS no interviene. Esto es solo para desarrollo local
+# contra la API desplegada. Tras el primer apply se le puede agregar la URL de CloudFront:
+#   terraform apply -var="cors_origin=$(terraform output -raw web_url),http://localhost:5173"
+cors_origin = "http://localhost:5173"
+
+# Siembra los datos de demo (Bupesa) al arrancar el contenedor. Idempotente.
+seed_demo_data = true
 
 # true = tareas ECS en subredes privadas + NAT Gateway (~USD 32/mes extra)
 enable_nat_gateway = false

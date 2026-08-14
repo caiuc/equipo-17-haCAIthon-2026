@@ -1,7 +1,13 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // Forma de objeto, no de array: con un array tsup deduciria un directorio base comun
+  // entre src/ y prisma/ y emitiria dist/src/index.js, rompiendo el CMD del Dockerfile.
+  // El seed se compila porque la imagen poda las devDependencies y ahi no sobrevive tsx.
+  entry: {
+    index: 'src/index.ts',
+    seed: 'prisma/seed.ts',
+  },
   format: ['esm'],
   target: 'node20',
   platform: 'node',

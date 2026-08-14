@@ -38,7 +38,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.database_url.arn]
+    resources = [aws_secretsmanager_secret.database_url.arn, aws_secretsmanager_secret.jwt.arn]
   }
 }
 
@@ -119,10 +119,14 @@ resource "aws_ecs_task_definition" "api" {
       { name = "NODE_ENV", value = "production" },
       { name = "PORT", value = "3000" },
       { name = "CORS_ORIGIN", value = var.cors_origin },
+      { name = "SEED_DEMO_DATA", value = tostring(var.seed_demo_data) },
+      # CloudFront -> ALB -> tarea: dos saltos antes de llegar aqui.
+      { name = "TRUST_PROXY", value = "2" },
     ]
 
     secrets = [
       { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
+      { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt.arn },
     ]
 
     logConfiguration = {

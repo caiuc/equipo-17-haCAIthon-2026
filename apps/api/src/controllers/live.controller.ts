@@ -1,9 +1,15 @@
 import type { RequestHandler } from 'express';
-import { HttpError } from '../middlewares/error.js';
+import { validatedParams, validatedQuery } from '../middlewares/validate.js';
+import { getRouteLiveState } from '../services/live.service.js';
 
-// STUB: lo implementa el agente responsable de esta area.
-const notImplemented: RequestHandler = () => {
-  throw new HttpError(501, 'No implementado');
+/** Vista en vivo del pasajero. Publica: quien espera en el paradero no tiene cuenta. */
+export const getRouteLive: RequestHandler = async (_req, res) => {
+  const { id } = validatedParams<{ id: string }>(res);
+  const { stopId } = validatedQuery<{ stopId?: string }>(res);
+
+  const live = await getRouteLiveState(id, stopId);
+
+  // Un dato de frescura cacheado es una contradiccion en sus propios terminos.
+  res.set('Cache-Control', 'no-store');
+  res.json(live);
 };
-
-export const getRouteLive: RequestHandler = notImplemented;

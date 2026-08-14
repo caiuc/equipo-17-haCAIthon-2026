@@ -51,3 +51,20 @@ resource "aws_secretsmanager_secret_version" "database_url" {
   secret_id     = aws_secretsmanager_secret.database_url.id
   secret_string = local.database_url
 }
+
+# Secreto de firma de los JWT. Se genera aqui para que nadie tenga que inventarlo
+# a mano: el API se niega a arrancar en produccion con el valor de desarrollo.
+resource "random_password" "jwt" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "jwt" {
+  name                    = "${local.name}/jwt-secret"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "jwt" {
+  secret_id     = aws_secretsmanager_secret.jwt.id
+  secret_string = random_password.jwt.result
+}
