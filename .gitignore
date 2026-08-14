@@ -50,3 +50,7 @@ terraform.tfvars
 # Cache de Python del generador de sprites
 __pycache__/
 *.pyc
+
+# Cache de Vite
+.vite/
+**/.vite/
