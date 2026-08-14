@@ -66,12 +66,16 @@ const MAX_BACKLOG = 180;
 /** Cuanto se espera al cierre masivo antes de avisar que algo quedo abierto. */
 const CIERRE_TIMEOUT_MS = 5_000;
 
+/** Ventana en la que una segunda senal se considera un reenvio, no un segundo Ctrl+C. */
+const REPETICION_SENAL_MS = 800;
+
 const etiquetaDe = (empresa: string, codigo: string): string => `[${empresa} ${codigo}]`;
 
 const micros: Micro[] = [];
 const detalles = new Map<string, RutaDetalle>();
 let contexto: Contexto | null = null;
 let cerrando = false;
+let cerrandoDesde = 0;
 
 // --- Lecturas del API ---
 
@@ -156,6 +160,13 @@ const finalizarTurno = async (ctx: Contexto, micro: Micro): Promise<void> => {
       micro.tripId = null;
     })
     .catch((error: unknown) => {
+      // 409 (ya finalizado) y 404 significan que el turno NO quedo abierto: se
+      // olvida igual, o el resumen de salida acusaria micros fantasma que no
+      // existen y mandaria al equipo a un --cleanup inutil.
+      if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
+        micro.tripId = null;
+        return;
+      }
       // El tripId se conserva: al salir hay que poder decir que quedo abierto.
       console.warn(`${micro.etiqueta} no pudo cerrar el turno: ${(error as Error).message}`);
     });
@@ -207,6 +218,9 @@ const emitir = async (ctx: Contexto, micro: Micro, muestra: Muestra): Promise<vo
       micro.fallos = 0;
     })
     .catch((error: unknown) => {
+      // Un POST que salio antes del cierre y aterrizo despues recibe un 409 que
+      // no significa nada: se descarta en silencio para no ensuciar la salida.
+      if (cerrando) return;
       // Un ping perdido es normal en terreno: se reintenta en el siguiente tick.
       micro.fallos += 1;
       console.warn(`${micro.etiqueta} ping fallido (${micro.fallos}):`, (error as Error).message);
@@ -549,6 +563,10 @@ const apagar = async (): Promise<void> => {
   const abiertos = (): Micro[] => micros.filter((micro) => micro.tripId !== null);
 
   if (cerrando) {
+    // pnpm y tsx reenvian la senal al hijo: el mismo Ctrl+C llega dos veces en
+    // el mismo instante y eso no es el usuario pidiendo salida forzada.
+    if (Date.now() - cerrandoDesde < REPETICION_SENAL_MS) return;
+
     // Segundo Ctrl+C: el usuario ya espero, se sale diciendo que queda abierto.
     const pendientes = abiertos();
     console.warn(
@@ -562,6 +580,7 @@ const apagar = async (): Promise<void> => {
   }
 
   cerrando = true;
+  cerrandoDesde = Date.now();
   const ctx = contexto;
   console.log(`\nCerrando ${abiertos().length} turnos... (Ctrl+C otra vez para forzar)`);
 

@@ -165,4 +165,14 @@ describe('buscarRutaInversa', () => {
   it('devuelve null cuando la empresa no publico la vuelta', () => {
     expect(buscarRutaInversa(ida, [ida])).toBeNull();
   });
+
+  it('entre varias vueltas entre los mismos terminales elige la del mismo corredor', () => {
+    const porMiraflores = { ...ida, id: 'r3', code: 'AUT-MIR-IDA', name: 'Miraflores ida' };
+    const vueltaOtroCamino = { ...vuelta, id: 'r4', code: 'AUT-PRA-VTA' };
+    const vueltaMiraflores = { ...vuelta, id: 'r5', code: 'AUT-MIR-VTA' };
+
+    expect(buscarRutaInversa(porMiraflores, [vueltaOtroCamino, vueltaMiraflores])?.code).toBe(
+      'AUT-MIR-VTA',
+    );
+  });
 });

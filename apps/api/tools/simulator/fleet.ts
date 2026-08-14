@@ -96,16 +96,32 @@ export const largoTotalM = (stops: Punto[]): number =>
  * la micro al origen.
  */
 export const buscarRutaInversa = (
-  actual: { id: string; originName: string; destinationName: string },
+  actual: { id: string; code: string; originName: string; destinationName: string },
   candidatas: RutaResumen[],
 ): RutaResumen | null => {
   const normal = (texto: string): string => texto.trim().toLowerCase();
-  return (
-    candidatas.find(
-      (ruta) =>
-        ruta.id !== actual.id &&
-        normal(ruta.originName) === normal(actual.destinationName) &&
-        normal(ruta.destinationName) === normal(actual.originName),
-    ) ?? null
+
+  const opuestas = candidatas.filter(
+    (ruta) =>
+      ruta.id !== actual.id &&
+      normal(ruta.originName) === normal(actual.destinationName) &&
+      normal(ruta.destinationName) === normal(actual.originName),
   );
+
+  // Varias rutas de la empresa pueden unir los mismos dos terminales por caminos
+  // distintos (AUT-MIR, MIR, AUT-PRA...). Se prefiere la que comparte prefijo de
+  // codigo: es la vuelta del MISMO corredor, no otra variante.
+  const prefijoComun = (codigo: string): number => {
+    let largo = 0;
+    while (
+      largo < codigo.length &&
+      largo < actual.code.length &&
+      codigo[largo] === actual.code[largo]
+    ) {
+      largo += 1;
+    }
+    return largo;
+  };
+
+  return [...opuestas].sort((a, b) => prefijoComun(b.code) - prefijoComun(a.code))[0] ?? null;
 };
