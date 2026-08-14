@@ -4,14 +4,18 @@ import { getCompanies } from "@/lib/api"
 /**
  * Las empresas activas, para el filtro del buscador.
  *
- * `getCompanies` ya cachea la promesa a nivel de modulo, asi que varios
- * componentes que lo pidan comparten una sola peticion en toda la sesion.
+ * `getCompanies` cachea la promesa a nivel de modulo, asi que varios componentes
+ * que la pidan comparten una sola peticion en toda la sesion. Son ocho fichas
+ * que cambian una vez al mes.
  *
- * A diferencia de `useCompany`, que resuelve UNA empresa por id, aca interesa la
- * lista completa: el filtro tiene que ofrecer tambien las empresas que en este
- * momento no tienen ninguna micro en ruta — si solo se listaran las que estan
- * transmitiendo, el filtro escondería justo a la empresa que el pasajero quiere
- * consultar y no habria forma de preguntar por ella.
+ * Se lista la TOTALIDAD de las empresas, no solo las que estan transmitiendo:
+ * si el filtro escondiera a las que ahora mismo no tienen ninguna micro en ruta,
+ * escondería justo a la que el pasajero quiere consultar, y no habria forma de
+ * preguntar por ella. "Ninguna micro de Islaval esta en ruta" es una respuesta;
+ * que Islaval no aparezca en la lista, no.
+ *
+ * Un fallo aca no bloquea el buscador: el filtro es un realce, no una
+ * dependencia dura del "¿viene o no viene?".
  */
 export function useCompanies() {
   const [companies, setCompanies] = useState([])
@@ -24,7 +28,7 @@ export function useCompanies() {
     getCompanies()
       .then((lista) => {
         if (!vigente) return
-        setCompanies(lista)
+        setCompanies(Array.isArray(lista) ? lista : [])
         setError(null)
       })
       .catch((err) => {

@@ -56,6 +56,31 @@ enum PassengerType {
   SENIOR
 }
 
+/// Region administrativa (ej. "Region Metropolitana"). Nace sembrada; nuevas
+/// regiones no se crean desde la app, solo zonas dentro de las existentes.
+model Region {
+  id    String @id @default(cuid())
+  name  String @unique
+  zones Zone[]
+}
+
+/// Zona/ciudad dentro de una region (ej. "Talagante"). Vive en el recorrido, NO
+/// en la empresa: una empresa puede operar en mas de una zona, y asociar la zona
+/// a la empresa mezclaria "quien presta el servicio" con "donde". Cualquier
+/// empresa puede crear una zona nueva al editar un recorrido; el alta hace
+/// upsert case-insensitive para que "Talagante" y "talagante" no queden como dos
+/// filas distintas.
+model Zone {
+  id       String @id @default(cuid())
+  regionId String
+  name     String
+
+  region Region  @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  routes Route[]
+
+  @@unique([regionId, name])
+}
+
 /// Empresa o cooperativa rural. Para la demo se crean pre-aprobadas (ACTIVE).
 model Company {
   id String @id @default(cuid())
@@ -189,7 +214,12 @@ model Route {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Zona geografica del recorrido, la gestiona la empresa. Opcional: un
+  /// recorrido sin zona asignada esta "pendiente", nunca se infiere una.
+  zoneId String?
+
   company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  zone      Zone?       @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   stops     RouteStop[]
   schedules Schedule[]
   fares     Fare[]
@@ -197,6 +227,7 @@ model Route {
 
   @@unique([companyId, code])
   @@index([companyId])
+  @@index([zoneId])
 }
 
 /// El orden explicito (stopOrder) es lo que permite razonar sobre el avance.

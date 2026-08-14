@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { dayTypeSchema } from './common.js';
 import { companyBriefSchema } from './company.js';
 import { fareSchema } from './fare.js';
+import { zoneSchema } from './region.js';
 
 export const routeStopSchema = z.object({
   id: z.string(),
@@ -28,6 +29,12 @@ export const routeSummarySchema = z.object({
    * que pintar la micro y el sprite que le corresponde a esta empresa.
    */
   company: companyBriefSchema,
+  /**
+   * null = zona pendiente de asignar por la empresa, nunca se infiere.
+   * Va aparte de `company` a proposito: una empresa puede operar en mas de
+   * una zona, asi que la zona describe el recorrido, no a quien lo presta.
+   */
+  zone: zoneSchema.nullable(),
   /**
    * De 0 a 3 filas. Vacio significa "la empresa no publica tarifa para este
    * recorrido", que no es lo mismo que gratis. Ver fareFor() en fare.ts.
@@ -73,6 +80,8 @@ export const createRouteSchema = z.object({
   originName: z.string().trim().min(2).max(120),
   destinationName: z.string().trim().min(2).max(120),
   active: z.boolean().optional().default(true),
+  /** Opcional: null/ausente desasigna la zona ("pendiente"), nunca se inventa. */
+  zoneId: z.string().nullable().optional(),
 });
 
 export const updateRouteSchema = createRouteSchema.partial();
@@ -104,8 +113,18 @@ export const upsertScheduleSchema = z.object({
     .max(3),
 });
 
+/**
+ * `companyId` repetido en la query string (`?companyId=a&companyId=b`) llega
+ * como array; una sola aparicion llega como string suelto. Se normaliza a
+ * array siempre para que el servicio no tenga que distinguir los dos casos.
+ */
 export const searchRoutesQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
+  companyId: z
+    .union([z.string(), z.string().array()])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : ([] as string[]).concat(value))),
+  zoneId: z.string().optional(),
 });
 
 export type RouteStop = z.infer<typeof routeStopSchema>;

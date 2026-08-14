@@ -1,15 +1,17 @@
-import { useCallback, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { ChevronLeft, Loader2, Search, X } from "lucide-react"
+import { ChevronLeft, ListFilter, Loader2, Search, Star, X } from "lucide-react"
 import { MapView } from "@/components/passenger/MapView"
 import { RideSheet } from "@/components/passenger/RideSheet"
-import { CompanyFilter } from "@/components/search/CompanyFilter"
+import { FilterSheet } from "@/components/passenger/FilterSheet"
 import { LocateButton } from "@/components/passenger/LocateButton"
 import { useCompanies } from "@/hooks/useCompanies"
 import { useCompany } from "@/hooks/useCompany"
 import { useElapsedSince } from "@/hooks/useElapsedSince"
+import { useFavorites } from "@/hooks/useFavorites"
 import { useLiveBuses } from "@/hooks/useLiveBuses"
 import { useLiveRoute } from "@/hooks/useLiveRoute"
+import { useRegions } from "@/hooks/useRegions"
 import { useRouteDetail } from "@/hooks/useRouteDetail"
 import { useRouteSearch } from "@/hooks/useRouteSearch"
 import { useUserLocation } from "@/hooks/useUserLocation"
@@ -44,8 +46,55 @@ export default function PassengerApp() {
   // en cada render seria un acceso sincrono al storage por frame.
   const [companyIds, setCompanyIds] = useState(getCompanyFilter)
 
+  const [zoneId, setZoneId] = useState(null)
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+
   const { companies } = useCompanies()
-  const { routes, loading: searching, error: searchError } = useRouteSearch(query)
+  const { regions } = useRegions()
+  const { isFavorite, toggleFavorite } = useFavorites()
+
+  const {
+    routes: searchedRoutes,
+    loading: searching,
+    error: searchError,
+  } = useRouteSearch(query, { companyIds, zoneId })
+
+  // El toggle de favoritos filtra en el cliente: los favoritos viven solo en
+  // este dispositivo, el backend no sabe nada de ellos.
+  const routes = favoritesOnly
+    ? searchedRoutes.filter((item) => isFavorite(item.id))
+    : searchedRoutes
+
+  const activeZoneName = useMemo(() => {
+    if (!zoneId) return null
+    for (const region of regions) {
+      const zone = region.zones.find((z) => z.id === zoneId)
+      if (zone) return zone.name
+    }
+    return null
+  }, [regions, zoneId])
+
+  const selectedCompanies = useMemo(
+    () => companies.filter((c) => companyIds.includes(c.id)),
+    [companies, companyIds],
+  )
+
+  const clearCompanies = () => {
+    setCompanyIds([])
+    setCompanyFilter([])
+    setZoneId(null)
+    setFavoritesOnly(false)
+  }
+
+  const hasActiveFilters = companyIds.length > 0 || Boolean(zoneId) || favoritesOnly
+
+  const removeCompanyFilter = (id) =>
+    setCompanyIds((prev) => {
+      const siguientes = prev.filter((c) => c !== id)
+      setCompanyFilter(siguientes)
+      return siguientes
+    })
   const {
     live,
     receivedAt: liveReceivedAt,
@@ -72,15 +121,6 @@ export default function PassengerApp() {
     [route, live, mapBuses],
   )
 
-  // Cuantas micros tiene cada empresa en ruta AHORA, antes de filtrar: es lo que
-  // hace que el chip pueda decir "0" en vez de dejar filtrar a ciegas.
-  const countByCompany = useMemo(() => {
-    const cuenta = new Map()
-    for (const bus of busesSinFiltrar) {
-      cuenta.set(bus.company.id, (cuenta.get(bus.company.id) ?? 0) + 1)
-    }
-    return cuenta
-  }, [busesSinFiltrar])
 
   /*
    * El filtro se aplica en el CLIENTE, no pidiendole al servidor.
@@ -119,20 +159,7 @@ export default function PassengerApp() {
     ? (live?.outOfService ?? true)
     : buses.length === 0
 
-  const toggleCompany = useCallback((companyId) => {
-    setCompanyIds((previas) => {
-      const siguientes = previas.includes(companyId)
-        ? previas.filter((id) => id !== companyId)
-        : [...previas, companyId]
-      setCompanyFilter(siguientes)
-      return siguientes
-    })
-  }, [])
 
-  const clearCompanies = useCallback(() => {
-    setCompanyIds([])
-    setCompanyFilter([])
-  }, [])
 
   /*
    * Lo que respondio el POST del reporte pisa a lo que trajo el ultimo poll,
@@ -287,20 +314,53 @@ export default function PassengerApp() {
               </button>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+            aria-label="Filtros"
+            className={`pointer-events-auto relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white shadow-md ${
+              hasActiveFilters ? "ring-2 ring-[var(--ink)]" : ""
+            }`}
+          >
+            <ListFilter className="h-4.5 w-4.5 text-[var(--ink)]" />
+          </button>
         </div>
 
-        {/* Los chips van bajo la barra y SIEMPRE visibles, tambien con la hoja
-            de resultados cerrada: si el filtro esta puesto tiene que verse, o el
-            mapa parece vacio sin explicacion. */}
-        <div className="ml-12">
-          <CompanyFilter
-            companies={companies}
-            selectedIds={companyIds}
-            onToggle={toggleCompany}
-            onClear={clearCompanies}
-            countByCompany={countByCompany}
-          />
-        </div>
+        {hasActiveFilters && (
+          <div className="pointer-events-auto ml-12 flex flex-wrap gap-1.5">
+            {favoritesOnly && (
+              <button
+                type="button"
+                onClick={() => setFavoritesOnly(false)}
+                className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-[12px] font-medium text-[var(--ink)] shadow-md"
+              >
+                <Star className="h-3 w-3 fill-current" /> Favoritos
+                <X className="h-3 w-3 text-[var(--ink-soft)]" />
+              </button>
+            )}
+            {activeZoneName && (
+              <button
+                type="button"
+                onClick={() => setZoneId(null)}
+                className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-[12px] font-medium text-[var(--ink)] shadow-md"
+              >
+                {activeZoneName}
+                <X className="h-3 w-3 text-[var(--ink-soft)]" />
+              </button>
+            )}
+            {selectedCompanies.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => removeCompanyFilter(c.id)}
+                className="flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-[12px] font-medium text-[var(--ink)] shadow-md"
+              >
+                {c.name}
+                <X className="h-3 w-3 text-[var(--ink-soft)]" />
+              </button>
+            ))}
+          </div>
+        )}
 
         {searchOpen && (
           <div className="pointer-events-auto ml-12 max-h-[55vh] overflow-y-auto rounded-2xl border border-[var(--line)] bg-white shadow-lg">
@@ -319,32 +379,49 @@ export default function PassengerApp() {
 
             {!searching && !searchError && routesFiltradas.length === 0 && (
               <p className="px-4 py-3 text-[13px] text-[var(--ink-soft)]">
-                {routes.length > 0
-                  ? `Ninguna empresa filtrada tiene recorridos con “${query}”.`
+                {favoritesOnly
+                  ? "No tienes recorridos favoritos que calcen con estos filtros."
+                  : routes.length > 0
+                    ? `Ninguna empresa filtrada tiene recorridos con “${query}”.`
                   : `No encontramos recorridos con “${query}”.`}
               </p>
             )}
 
             {!searching &&
               routesFiltradas.map((item) => (
-                <button
+                <div
                   key={item.id}
-                  type="button"
-                  onClick={() => selectRoute(item.id)}
-                  className="flex w-full flex-col items-start gap-0.5 border-b border-[var(--line)] px-4 py-3 text-left last:border-b-0 hover:bg-[var(--mist)]"
+                  className="flex items-start gap-1 border-b border-[var(--line)] last:border-b-0 hover:bg-[var(--mist)]"
                 >
-                  <span className="text-[14px] font-semibold text-[var(--ink)]">
-                    {item.code} · {item.name}
-                  </span>
-                  <span className="text-[12px] text-[var(--ink-soft)]">
-                    {item.originName} → {item.destinationName}
-                  </span>
-                  <span className="text-[11px] text-[var(--ink-soft)]">
-                    {item.activeBuses > 0
-                      ? `${item.activeBuses} ${item.activeBuses === 1 ? "micro" : "micros"} en ruta`
-                      : "Sin micros en ruta ahora"}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => selectRoute(item.id)}
+                    className="flex flex-1 flex-col items-start gap-0.5 px-4 py-3 text-left"
+                  >
+                    <span className="text-[14px] font-semibold text-[var(--ink)]">
+                      {item.code} · {item.name}
+                    </span>
+                    <span className="text-[12px] text-[var(--ink-soft)]">
+                      {item.originName} → {item.destinationName}
+                    </span>
+                    <span className="text-[11px] text-[var(--ink-soft)]">
+                      {item.activeBuses > 0
+                        ? `${item.activeBuses} ${item.activeBuses === 1 ? "micro" : "micros"} en ruta`
+                        : "Sin micros en ruta ahora"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleFavorite(item.id)}
+                    aria-label={isFavorite(item.id) ? "Quitar de favoritos" : "Agregar a favoritos"}
+                    aria-pressed={isFavorite(item.id)}
+                    className="shrink-0 px-3.5 py-3 text-[var(--ink-soft)]"
+                  >
+                    <Star
+                      className={`h-4.5 w-4.5 ${isFavorite(item.id) ? "fill-current text-[var(--ink)]" : ""}`}
+                    />
+                  </button>
+                </div>
               ))}
           </div>
         )}
@@ -469,6 +546,20 @@ export default function PassengerApp() {
         detailRoute={detailRoute}
         detailRouteLoading={detailRouteLoading}
         selectedStop={selectedStop}
+      />
+
+      <FilterSheet
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        selectedCompanyIds={companyIds}
+        selectedZoneId={zoneId}
+        favoritesOnly={favoritesOnly}
+        onApply={(next) => {
+          setCompanyIds(next.companyIds)
+          setCompanyFilter(next.companyIds)
+          setZoneId(next.zoneId)
+          setFavoritesOnly(next.favoritesOnly)
+        }}
       />
     </div>
   )

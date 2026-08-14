@@ -17,6 +17,7 @@ import { HttpError } from '../middlewares/error.js';
 
 const companySelect = {
   company: { select: { id: true, slug: true, name: true, color: true, assetSlug: true } },
+  zone: { select: { id: true, name: true } },
 } as const;
 
 /** 0 a 3 filas. Vacio = tarifa no publicada, que NO es lo mismo que gratis. */
@@ -31,6 +32,7 @@ type RouteWithCompany = {
   originName: string;
   destinationName: string;
   company: { id: string; slug: string; name: string; color: string; assetSlug: string };
+  zone: { id: string; name: string } | null;
   fares: { passengerType: PassengerType; amountClp: number }[];
 };
 
@@ -71,6 +73,8 @@ const toSummary = (route: RouteWithCompany, activeBuses: number): RouteSummary =
     color: route.company.color,
     assetSlug: assetSlugOr(route.company.assetSlug),
   },
+  // null = zona pendiente de asignar por la empresa, nunca se infiere.
+  zone: route.zone ? { id: route.zone.id, name: route.zone.name } : null,
   // Se pasan tal cual: la ausencia de una fila es informacion, no un hueco que
   // haya que rellenar con cero.
   fares: route.fares.map((fare): Fare => ({
@@ -80,14 +84,22 @@ const toSummary = (route: RouteWithCompany, activeBuses: number): RouteSummary =
   activeBuses,
 });
 
+export type SearchRoutesFilters = {
+  q?: string;
+  /** OR entre empresas, AND con el resto de los filtros. */
+  companyId?: string[];
+  zoneId?: string;
+};
+
 /**
  * Busqueda por nombre o codigo, insensible a mayusculas y acentos de teclado
- * (el usuario escribe "vicuna" o "VIC"). Sin `q` devuelve el catalogo completo.
- * Cero resultados es una lista vacia, no un 404: "no encontre ese recorrido" es
- * una respuesta valida de la busqueda, no un error.
+ * (el usuario escribe "vicuna" o "VIC"), mas los filtros opcionales de empresa
+ * y zona. Sin filtros devuelve el catalogo completo. Cero resultados es una
+ * lista vacia, no un 404: "no encontre ese recorrido" es una respuesta valida
+ * de la busqueda, no un error.
  */
-export const searchRoutes = async (q?: string): Promise<RouteSummary[]> => {
-  const term = q?.trim();
+export const searchRoutes = async (filters: SearchRoutesFilters = {}): Promise<RouteSummary[]> => {
+  const term = filters.q?.trim();
 
   const routes = await prisma.route.findMany({
     where: {
@@ -101,6 +113,8 @@ export const searchRoutes = async (q?: string): Promise<RouteSummary[]> => {
             ],
           }
         : {}),
+      ...(filters.companyId?.length ? { companyId: { in: filters.companyId } } : {}),
+      ...(filters.zoneId ? { zoneId: filters.zoneId } : {}),
     },
     include: { ...companySelect, ...fareSelect },
     orderBy: [{ code: 'asc' }],

@@ -70,10 +70,26 @@ async function request(path, { method = "GET", body, auth = false, headers = {} 
 
 // --- Publico (sin cuenta) ---
 
-export const searchRoutes = (q) =>
-  request(`/api/routes${q ? `?q=${encodeURIComponent(q)}` : ""}`)
+/**
+ * `companyIds` va repetido en la query string (?companyId=a&companyId=b): el
+ * backend lo normaliza a array y hace OR entre empresas.
+ */
+export const searchRoutes = ({ q, companyIds, zoneId } = {}) => {
+  const query = new URLSearchParams()
+  if (q) query.set("q", q)
+  if (zoneId) query.set("zoneId", zoneId)
+  for (const id of companyIds ?? []) query.append("companyId", id)
+  const qs = query.toString()
+  return request(`/api/routes${qs ? `?${qs}` : ""}`)
+}
 
 export const getRoute = (routeId) => request(`/api/routes/${routeId}`)
+
+/** Fichas de empresas: nombre, color, telefono. Alimenta el filtro por empresa. */
+export const listCompanies = () => request("/api/companies")
+
+/** Arbol region -> zonas, para los selectores encadenados del filtro. */
+export const listRegions = () => request("/api/regions")
 
 /**
  * Fichas publicas de las empresas, cacheadas en memoria por toda la sesion.
@@ -149,6 +165,14 @@ export const company = {
     request(`/api/company/routes/${id}/stops`, { method: "PUT", body: { stops }, auth: true }),
   replaceSchedules: (id, schedules) =>
     request(`/api/company/routes/${id}/schedules`, { method: "PUT", body: { schedules }, auth: true }),
+  listRegions: () => request("/api/company/regions", { auth: true }),
+  /** Upsert case-insensitive: crear "Talagante" dos veces devuelve la misma zona. */
+  createZone: (regionId, name) =>
+    request(`/api/company/regions/${regionId}/zones`, {
+      method: "POST",
+      body: { name },
+      auth: true,
+    }),
   listDrivers: () => request("/api/company/drivers", { auth: true }),
   createDriver: (input) => request("/api/company/drivers", { method: "POST", body: input, auth: true }),
   updateDriver: (id, input) =>
