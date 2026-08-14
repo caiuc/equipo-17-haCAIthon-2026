@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getRouteLive } from "@/lib/api"
-import { LIVE_POLL_MS } from "@/lib/constants"
+import { LIVE_POLL_INTERVAL_MS } from "@equipo17/shared"
 
 /**
- * Estado en vivo de un recorrido, consultado cada LIVE_POLL_MS.
+ * Estado en vivo de un recorrido, consultado cada LIVE_POLL_INTERVAL_MS.
  *
  * Dos decisiones que vienen del terreno rural:
  *
@@ -64,7 +64,7 @@ export function useLiveRoute(routeId, stopId) {
 
     let timer = null
     const startPolling = () => {
-      if (timer == null) timer = setInterval(refresh, LIVE_POLL_MS)
+      if (timer == null) timer = setInterval(refresh, LIVE_POLL_INTERVAL_MS)
     }
     const stopPolling = () => {
       if (timer != null) {

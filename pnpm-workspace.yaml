@@ -1,6 +1,10 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  # El frontend vive en la raiz y no bajo apps/ por razones historicas: nacio en
+  # una rama propia. Esta aqui para que pueda importar @equipo17/shared, que es
+  # el contrato unico con el backend.
+  - 'frontend'
 
 # pnpm 10 bloquea los postinstall por defecto. Estos si los necesitamos:
 # prisma genera su cliente y esbuild descarga su binario nativo.

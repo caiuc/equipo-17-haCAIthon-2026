@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Bus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { company } from "@/lib/api"
-import { LIVE_POLL_MS } from "@/lib/constants"
+import { LIVE_POLL_INTERVAL_MS } from "@equipo17/shared"
 import { getFreshness } from "@/lib/freshness"
 import { EmptyState, ErrorNotice } from "./Primitives"
 
@@ -30,7 +30,7 @@ export function FleetPanel({ onAuthError }) {
     }
 
     poll()
-    const id = setInterval(poll, LIVE_POLL_MS)
+    const id = setInterval(poll, LIVE_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       clearInterval(id)
@@ -46,7 +46,7 @@ export function FleetPanel({ onAuthError }) {
       <div>
         <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-[var(--ink)]">Flota en ruta</h2>
         <p className="mt-1 text-[14px] text-[var(--ink-soft)]">
-          Turnos en curso ahora. Se actualiza solo cada {LIVE_POLL_MS / 1000} segundos.
+          Turnos en curso ahora. Se actualiza solo cada {LIVE_POLL_INTERVAL_MS / 1000} segundos.
         </p>
       </div>
 

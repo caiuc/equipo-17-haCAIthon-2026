@@ -76,7 +76,7 @@ export const searchRoutes = (q) =>
 export const getRoute = (routeId) => request(`/api/routes/${routeId}`)
 
 /**
- * Estado en vivo de un recorrido. Consultar cada LIVE_POLL_MS.
+ * Estado en vivo de un recorrido. Consultar cada LIVE_POLL_INTERVAL_MS.
  * `stopId` es opcional: sin el, distanceMeters viene null en todas las micros.
  */
 export const getRouteLive = (routeId, stopId) =>

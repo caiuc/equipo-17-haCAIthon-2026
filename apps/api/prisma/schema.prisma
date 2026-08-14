@@ -42,11 +42,51 @@ enum ReportSource {
   PASSENGER
 }
 
+/// Privada o municipal. No decide la tarifa: gratis es una fila de Fare con
+/// amountClp 0, no una consecuencia de ser municipal. Existe para explicar por
+/// que una empresa no tiene rut y para distinguir el servicio en la interfaz.
+enum CompanyKind {
+  PRIVATE
+  MUNICIPAL
+}
+
+enum PassengerType {
+  ADULT
+  STUDENT
+  SENIOR
+}
+
 /// Empresa o cooperativa rural. Para la demo se crean pre-aprobadas (ACTIVE).
 model Company {
-  id        String        @id @default(cuid())
-  name      String
-  rut       String?       @unique
+  id String @id @default(cuid())
+
+  /// Clave natural estable entre corridas del seed. El rut no sirve para esto:
+  /// de las ocho empresas sembradas solo una lo publica, y los servicios
+  /// municipales no tienen. Un upsert por rut nulo no es valido en Prisma.
+  slug String @unique
+
+  name String
+  rut  String?     @unique
+  kind CompanyKind @default(PRIVATE)
+
+  /// Color de marca con el que se pintan sus micros en el mapa y en la lista.
+  color String @default("#1B5FC1")
+
+  /// Sprite de la micro. Es el nombre de un archivo de
+  /// frontend/public/assets/micros/, NO una URL: se valida contra la lista
+  /// blanca de packages/shared antes de que el cliente arme la ruta.
+  assetSlug String @default("generico")
+
+  phone   String?
+  website String?
+
+  /// De donde salio la ficha de esta empresa y cuando se consulto. El principio
+  /// rector vale tambien para el dato estatico: la tarifa de Damir que circula
+  /// en prensa es de julio de 2022, y mostrarla sin fecha seria presentar como
+  /// vigente un dato de hace cuatro anos.
+  sourceUrl       String?
+  sourceCheckedAt DateTime?
+
   status    CompanyStatus @default(ACTIVE)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
@@ -54,6 +94,53 @@ model Company {
   users  User[]
   routes Route[]
   trips  Trip[]
+  buses  Bus[]
+}
+
+/// Tarifa publicada de un recorrido, por tipo de pasajero.
+///
+/// Modelo aparte y no columnas en Route porque la AUSENCIA de fila significa
+/// "no publicada", y eso no es lo mismo que 0: MuniBus Paine es gratuito de
+/// verdad, mientras que cuatro de las ocho empresas simplemente no publican su
+/// tarifa. Colapsar ambos casos en un Int con default 0 haria que la interfaz
+/// dijera "Gratis" donde en realidad no sabemos.
+///
+/// Sin vigencia temporal a proposito: una tarifa historica no responde ninguna
+/// pregunta de alguien parado en un paradero.
+model Fare {
+  id            String        @id @default(cuid())
+  routeId       String
+  passengerType PassengerType
+  /// Pesos chilenos, entero: el pasaje no tiene decimales.
+  amountClp     Int
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  // El unique compuesto ya deja routeId como columna lider del indice.
+  @@unique([routeId, passengerType])
+}
+
+/// Vehiculo concreto de la flota. Opcional en todo el flujo: el chofer puede
+/// iniciar turno sin declarar en que micro va y el mapa se pinta igual, cayendo
+/// al sprite de la empresa. Sin tabla de tipos de vehiculo: lo unico que varia
+/// entre micros es la patente y los asientos, y el dibujo lo define la empresa.
+model Bus {
+  id        String @id @default(cuid())
+  companyId String
+  plate     String
+  seats     Int?
+  /// Override del sprite de la empresa, para la flota que no se ve como el resto.
+  assetSlug String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trips   Trip[]
+
+  @@unique([companyId, plate])
 }
 
 /// Un solo modelo para los cuatro roles. Los campos de chofer (licenseNumber,
@@ -95,6 +182,7 @@ model Route {
   company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   stops     RouteStop[]
   schedules Schedule[]
+  fares     Fare[]
   trips     Trip[]
 
   @@unique([companyId, code])
@@ -143,9 +231,16 @@ model Trip {
   startedAt DateTime   @default(now())
   endedAt   DateTime?
 
+  /// Opcional: exigirlo romperia POST /api/driver/trips/start, que hoy solo
+  /// recibe routeId, y dejaria turnos imposibles de iniciar si la empresa aun no
+  /// cargo su flota. Cuando es null el mapa usa el sprite de la empresa y no
+  /// inventa una patente que no conoce.
+  busId String?
+
   route     Route              @relation(fields: [routeId], references: [id], onDelete: Cascade)
   driver    User               @relation(fields: [driverId], references: [id], onDelete: Cascade)
   company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus       Bus?               @relation(fields: [busId], references: [id], onDelete: SetNull)
   positions Position[]
   reports   OccupancyReport[]
 

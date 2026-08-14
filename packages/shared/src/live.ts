@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { freshnessSchema, latLngSchema } from './common.js';
+import { companyBriefSchema } from './company.js';
 
 // --- Ingesta del chofer ---
 
@@ -53,6 +54,18 @@ export const reportOccupancySchema = z.object({
 export const liveBusSchema = z.object({
   tripId: z.string(),
   routeId: z.string(),
+  /** El mapa mezcla recorridos de varias empresas: cada micro declara el suyo. */
+  routeCode: z.string(),
+  routeName: z.string(),
+  company: companyBriefSchema,
+  /** null cuando el chofer inicio turno sin declarar vehiculo. No se inventa. */
+  plate: z.string().nullable(),
+  seats: z.number().int().positive().nullable(),
+  /**
+   * Tarifa de adulto: el numero que el pasajero necesita tener en la mano.
+   * null = no publicada. NO se colapsa con 0, que significa gratuito.
+   */
+  fareAdultClp: z.number().int().nonnegative().nullable(),
   driverName: z.string(),
   position: latLngSchema,
   speed: z.number().nullable(),
@@ -85,5 +98,63 @@ export type LiveRoute = z.infer<typeof liveRouteSchema>;
 export const liveQuerySchema = z.object({
   stopId: z.string().min(1).optional(),
 });
+
+// --- El mapa: todas las micros vivas, de todas las empresas ---
+
+/**
+ * Caja del viewport en orden OGC/GeoJSON: oeste,sur,este,norte.
+ *
+ * Se valida en vez de corregir en silencio porque un bbox invertido devolveria
+ * un mapa vacio sin ningun error visible, que es la peor clase de bug: parece
+ * "no hay micros" cuando en realidad la consulta estaba mal.
+ *
+ * No se contempla cruce del antimeridiano: Chile no lo cruza, y manejarlo seria
+ * complejidad sin caso de uso.
+ */
+export const bboxSchema = z
+  .string()
+  .transform((raw) => raw.split(',').map(Number))
+  .refine(
+    (parts) => parts.length === 4 && parts.every((n) => Number.isFinite(n)),
+    'bbox debe ser cuatro numeros: minLng,minLat,maxLng,maxLat',
+  )
+  .transform(([west, south, east, north]) => ({
+    west: west as number,
+    south: south as number,
+    east: east as number,
+    north: north as number,
+  }))
+  .refine((b) => b.west < b.east && b.south < b.north, 'bbox invertido')
+  .refine(
+    (b) => b.south >= -90 && b.north <= 90 && b.west >= -180 && b.east <= 180,
+    'bbox fuera de rango geografico',
+  );
+export type Bounds = z.infer<typeof bboxSchema>;
+
+export const liveBusesQuerySchema = z.object({
+  /**
+   * Opcional: el primer render ocurre antes de que el mapa reporte sus limites,
+   * y la lista del bottom sheet los necesita todos.
+   */
+  bbox: bboxSchema.optional(),
+  companyId: z.string().min(1).optional(),
+  routeId: z.string().min(1).optional(),
+  /** Paradero de referencia para la distancia. */
+  stopId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
+});
+export type LiveBusesQuery = z.infer<typeof liveBusesQuerySchema>;
+
+export const liveBusesSchema = z.object({
+  /** Reloj del servidor: el cliente calcula edades con este, no con el suyo. */
+  serverTime: z.string(),
+  stopId: z.string().nullable(),
+  buses: liveBusSchema.array(),
+  /** Cuantas micros vivas habia antes de recortar por limit. */
+  total: z.number().int().nonnegative(),
+  /** true si se recorto: la interfaz debe decir que hay mas fuera de la vista. */
+  truncated: z.boolean(),
+});
+export type LiveBuses = z.infer<typeof liveBusesSchema>;
 
 export type PositionInput = z.infer<typeof positionInputSchema>;

@@ -14,3 +14,8 @@ export const getRoute: RequestHandler = async (_req, res) => {
   const { id } = validatedParams<{ id: string }>(res);
   res.json(await publicRoutes.getRouteDetail(id));
 };
+
+/** Fichas de las empresas: colores del mapa, y el telefono al que llamar. */
+export const listCompanies: RequestHandler = async (_req, res) => {
+  res.json(await publicRoutes.listPublicCompanies());
+};

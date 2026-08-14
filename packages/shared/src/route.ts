@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { dayTypeSchema } from './common.js';
+import { companyBriefSchema } from './company.js';
+import { fareSchema } from './fare.js';
 
 export const routeStopSchema = z.object({
   id: z.string(),
@@ -21,7 +23,16 @@ export const routeSummarySchema = z.object({
   code: z.string(),
   originName: z.string(),
   destinationName: z.string(),
-  companyName: z.string(),
+  /**
+   * Reemplaza al antiguo `companyName`: el mapa necesita ademas el color con el
+   * que pintar la micro y el sprite que le corresponde a esta empresa.
+   */
+  company: companyBriefSchema,
+  /**
+   * De 0 a 3 filas. Vacio significa "la empresa no publica tarifa para este
+   * recorrido", que no es lo mismo que gratis. Ver fareFor() en fare.ts.
+   */
+  fares: fareSchema.array(),
   /** Cuantas micros van en ruta ahora mismo. 0 responde el "no viene ninguna". */
   activeBuses: z.number().int().nonnegative(),
 });

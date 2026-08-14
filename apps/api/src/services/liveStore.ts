@@ -20,6 +20,15 @@ export type LiveTrip = LivePosition & {
   companyId: string;
   driverId: string;
   driverName: string;
+  /**
+   * Datos del vehiculo declarado al iniciar turno. Se guardan aca porque ya
+   * vienen gratis en el findUnique que recordPositions hace en cada ping; todo
+   * lo demas (empresa, color, tarifa) vive en companyCatalog, que se cachea.
+   * null cuando el chofer no declaro vehiculo: no se inventa uno.
+   */
+  busPlate: string | null;
+  busSeats: number | null;
+  busAssetSlug: string | null;
   /** Cuando se bajo la ultima posicion a Postgres. */
   lastPersistedAt: number;
 };
@@ -48,6 +57,30 @@ export const getLiveTripsByRoute = (routeId: string): LiveTrip[] =>
 
 export const getLiveTripsByCompany = (companyId: string): LiveTrip[] =>
   [...trips.values()].filter((trip) => trip.companyId === companyId);
+
+/** Todos los turnos vivos. Lo consume el mapa, que no filtra por recorrido. */
+export const getAllLiveTrips = (): LiveTrip[] => [...trips.values()];
+
+/**
+ * Filtra por el rectangulo del viewport. Cuatro comparaciones de numeros contra
+ * el haversine por micro que exigiria un radio.
+ *
+ * No contempla cruce del antimeridiano: Chile no lo cruza, y manejarlo seria
+ * complejidad sin caso de uso. Queda dicho para que sea decision y no olvido.
+ */
+export const getLiveTripsInBounds = (bounds: {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}): LiveTrip[] =>
+  [...trips.values()].filter(
+    (trip) =>
+      trip.lat >= bounds.south &&
+      trip.lat <= bounds.north &&
+      trip.lng >= bounds.west &&
+      trip.lng <= bounds.east,
+  );
 
 export const clearLiveTrips = (): void => {
   trips.clear();
@@ -79,9 +112,18 @@ export const shouldPersist = (trip: LiveTrip, now = Date.now()): boolean =>
  */
 export const hydrateLiveTrips = async (): Promise<number> => {
   const active = await prisma.trip.findMany({
-    where: { status: 'IN_TRANSIT' },
+    where: {
+      status: 'IN_TRANSIT',
+      // Un turno que nadie cerro nunca no es una micro en ruta. Sin este corte,
+      // cada Ctrl+C del simulador deja turnos IN_TRANSIT para siempre y el
+      // arranque los revive uno por uno, indefinidamente.
+      startedAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) },
+    },
     include: {
       driver: { select: { name: true } },
+      // El vehiculo es opcional en todo el flujo: un turno sin bus declarado se
+      // rehidrata igual y el mapa cae al sprite de la empresa.
+      bus: { select: { plate: true, seats: true, assetSlug: true } },
       positions: { orderBy: { recordedAt: 'desc' }, take: 1 },
     },
   });
@@ -95,6 +137,9 @@ export const hydrateLiveTrips = async (): Promise<number> => {
       companyId: trip.companyId,
       driverId: trip.driverId,
       driverName: trip.driver.name,
+      busPlate: trip.bus?.plate ?? null,
+      busSeats: trip.bus?.seats ?? null,
+      busAssetSlug: trip.bus?.assetSlug ?? null,
       lat: last.lat,
       lng: last.lng,
       speed: last.speed,
