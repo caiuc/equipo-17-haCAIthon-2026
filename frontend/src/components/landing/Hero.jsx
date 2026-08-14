@@ -35,10 +35,10 @@ export function Hero() {
 
           <div className="mt-9 flex flex-wrap items-center gap-4">
             <Button
-              render={<Link to="/app" />}
+              render={<Link to="/dashboard" />}
               className="h-12 rounded-full bg-[var(--accent)] px-6 text-[15px] font-medium text-white transition-transform duration-200 ease-out hover:-translate-y-0.5 hover:bg-[var(--accent-deep)] active:translate-y-0"
             >
-              Ver demo
+              Empezar a usarla
             </Button>
             <a
               href="#problema"
