@@ -1,38 +1,9 @@
-import { useState } from "react"
-import { Check, Users } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { ChevronRight, Users } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { BusSprite } from "@/components/passenger/BusSprite"
+import { OccupancyVote } from "@/components/passenger/OccupancyVote"
 import { formatFare } from "@/lib/fare"
 import { FRESHNESS, formatDistance, formatOccupancy, getFreshness } from "@/lib/freshness"
-
-const REPORT_CONFIRMATION_MS = 2500
-
-function OccupancyBadge({ occupancy }) {
-  const shown = formatOccupancy(occupancy)
-
-  if (!shown) {
-    return (
-      <span className="text-[12px] text-[var(--ink-soft)]">Nadie ha reportado si va llena</span>
-    )
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Badge
-        className={`rounded-full px-2 py-0 text-[11px] font-medium ${
-          shown.tone === "full"
-            ? "bg-[var(--accent-soft)] text-[var(--accent-deep)]"
-            : "bg-[#e9f7ef] text-[#12784a]"
-        }`}
-      >
-        {shown.label}
-      </Badge>
-      <span className="text-[12px] text-[var(--ink-soft)]">{shown.detail}</span>
-    </div>
-  )
-}
 
 /**
  * Aqui NO va un ETA en minutos. No modelamos subida de pasajeros, paradas a la
@@ -54,27 +25,18 @@ function DistanceLine({ distanceMeters, unreliable }) {
   return <span className="text-[12px] text-[var(--ink-soft)]">Elige tu paradero para la distancia</span>
 }
 
-export function MicroCard({ bus, selected, onSelect, onReportOccupancy, elapsedMs = 0 }) {
-  const [sending, setSending] = useState(false)
-  const [confirmed, setConfirmed] = useState(null)
-
+/**
+ * Una micro en la lista: lo justo para decidir. El detalle completo — empresa,
+ * horarios, tarifas por tipo de pasajero, procedencia del dato — se abre al
+ * tocarla, en `MicroDetailSheet`. Meterlo todo en la tarjeta convertiria la
+ * lista en algo imposible de barrer con el pulgar.
+ */
+export function MicroCard({ bus, selected, onSelect, onReportOccupancy, myVote, elapsedMs = 0 }) {
   const freshness = getFreshness(bus, elapsedMs)
   const fare = formatFare(bus.fareAdultClp)
   // Sin señal significa que la posición ya no sostiene una distancia: no se
   // estima nada, se declara la incertidumbre.
   const positionUnreliable = freshness.status === FRESHNESS.NO_SIGNAL
-
-  async function report(full) {
-    if (sending) return
-    setSending(true)
-    try {
-      await onReportOccupancy?.(bus.tripId, full)
-      setConfirmed(full ? "Reportaste que va llena" : "Reportaste que ya no va llena")
-      setTimeout(() => setConfirmed(null), REPORT_CONFIRMATION_MS)
-    } finally {
-      setSending(false)
-    }
-  }
 
   return (
     <div
@@ -86,7 +48,7 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy, elapsedM
         type="button"
         onClick={() => onSelect?.(bus.tripId)}
         className="flex w-full flex-col gap-2 px-3.5 py-3 text-left"
-        aria-pressed={selected}
+        aria-label={`Ver detalle de ${bus.routeCode}, ${bus.company.name}`}
       >
         <div className="flex items-center gap-3">
           {/* En la lista el rumbo no aporta: el sprite va derecho. */}
@@ -94,7 +56,6 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy, elapsedM
             assetSlug={bus.company.assetSlug}
             status={freshness.status}
             statusLabel={freshness.label}
-            companyColor={bus.company.color}
             size={44}
             rotate={false}
           />
@@ -129,6 +90,8 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy, elapsedM
             </p>
             <DistanceLine distanceMeters={bus.distanceMeters} unreliable={positionUnreliable} />
           </div>
+
+          <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" strokeWidth={2} />
         </div>
 
         {/* Nunca un dato sin decir que tan viejo es: el chip y su texto. */}
@@ -141,45 +104,17 @@ export function MicroCard({ bus, selected, onSelect, onReportOccupancy, elapsedM
           </span>
           <span className="text-[12px] text-[var(--ink-soft)]">{freshness.message}</span>
         </div>
-
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="truncate text-[12px] text-[var(--ink-soft)]">{bus.driverName}</span>
-          {bus.plate && (
-            <span className="text-[12px] text-[var(--ink-soft)]">· {bus.plate}</span>
-          )}
-        </div>
-
-        <OccupancyBadge occupancy={bus.occupancy} />
       </button>
 
       <Separator className="bg-[var(--line)]" />
 
-      <div className="flex items-center gap-2 px-3.5 py-2.5">
-        {confirmed ? (
-          <p className="flex items-center gap-1.5 text-[12px] font-medium text-[#12784a]">
-            <Check className="h-4 w-4" strokeWidth={2} />
-            {confirmed}
-          </p>
-        ) : (
-          <>
-            <Button
-              variant="outline"
-              onClick={() => report(true)}
-              disabled={sending}
-              className="h-10 flex-1 rounded-xl text-[13px]"
-            >
-              Va llena
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => report(false)}
-              disabled={sending}
-              className="h-10 flex-1 rounded-xl text-[13px]"
-            >
-              Ya no va llena
-            </Button>
-          </>
-        )}
+      <div className="px-3.5 py-2.5">
+        <OccupancyVote
+          occupancy={formatOccupancy(bus.occupancy)}
+          tripId={bus.tripId}
+          myVote={myVote}
+          onReportOccupancy={onReportOccupancy}
+        />
       </div>
     </div>
   )

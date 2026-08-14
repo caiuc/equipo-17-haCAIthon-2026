@@ -11,7 +11,11 @@
  * dato, que es justo lo que el principio rector prohibe.
  */
 
-import { FRESHNESS_INTERMITTENT_MS, FRESHNESS_LIVE_MS } from "@equipo17/shared"
+import {
+  FRESHNESS_INTERMITTENT_MS,
+  FRESHNESS_LIVE_MS,
+  OCCUPANCY_FULL_THRESHOLD,
+} from "@equipo17/shared"
 
 export const FRESHNESS = {
   LIVE: "LIVE",
@@ -22,8 +26,9 @@ export const FRESHNESS = {
 
 /**
  * El color ya significa "empresa" en este mapa, asi que la frescura NO se
- * expresa con color sobre el sprite: se expresa con saturacion, anillo y
- * movimiento. Y nunca solo con eso — cada estado lleva ademas su texto.
+ * expresa con color sobre el sprite: se expresa con saturacion del dibujo,
+ * con un punto que late junto a la etiqueta y con la etiqueta misma. Nunca solo
+ * con color — cada estado lleva ademas su texto.
  *
  * `animated` es tambien la regla de la animacion: solo LIVE se mueve. Una micro
  * sin senal deslizandose por el mapa seria una mentira en movimiento.
@@ -33,25 +38,25 @@ const STYLES = {
     label: "En vivo",
     color: "#1fae5f",
     dotClass: "bg-[#1fae5f]",
-    sprite: { filter: "none", ring: "pulse", animated: true, zIndex: 30 },
+    sprite: { filter: "none", animated: true, zIndex: 30 },
   },
   [FRESHNESS.INTERMITTENT]: {
     label: "Señal intermitente",
     color: "#e0a300",
     dotClass: "bg-[#e0a300]",
-    sprite: { filter: "saturate(0.55)", ring: "dashed", animated: false, zIndex: 20 },
+    sprite: { filter: "saturate(0.55)", animated: false, zIndex: 20 },
   },
   [FRESHNESS.NO_SIGNAL]: {
     label: "Sin señal",
     color: "#e0430f",
     dotClass: "bg-[#e0430f]",
-    sprite: { filter: "grayscale(1) opacity(0.55)", ring: "none", animated: false, zIndex: 1 },
+    sprite: { filter: "grayscale(1) opacity(0.55)", animated: false, zIndex: 1 },
   },
   [FRESHNESS.OUT_OF_SERVICE]: {
     label: "Fuera de servicio",
     color: "#8a8a92",
     dotClass: "bg-[#8a8a92]",
-    sprite: { filter: "grayscale(1) opacity(0.55)", ring: "none", animated: false, zIndex: 1 },
+    sprite: { filter: "grayscale(1) opacity(0.55)", animated: false, zIndex: 1 },
   },
 }
 
@@ -119,6 +124,12 @@ export const spriteTreatment = (status) =>
   (STYLES[status] ?? STYLES[FRESHNESS.OUT_OF_SERVICE]).sprite
 
 /**
+ * Etiqueta, color y punto de un estado, sin calcular edad. Lo usa el sprite del
+ * mapa, que recibe el estado ya resuelto y solo necesita como pintarlo.
+ */
+export const freshnessStyle = (status) => STYLES[status] ?? STYLES[FRESHNESS.OUT_OF_SERVICE]
+
+/**
  * Distancia lista para mostrar. Devuelve null cuando el backend no la entrega,
  * que es exactamente cuando la posicion es demasiado vieja para sostenerla:
  * en ese caso NO se estima nada por cuenta propia.
@@ -134,22 +145,54 @@ export function formatDistance(distanceMeters) {
   return `${km} km`
 }
 
-/** Como se muestra el estado de ocupacion que resuelve el backend. */
+/**
+ * Como se muestra el estado de ocupacion que resuelve el backend.
+ *
+ * Son CUATRO casos, no dos. El bug que esto arregla nacia de colapsarlos: con un
+ * solo voto de pasajero el backend responde `NOT_FULL` (hacen falta
+ * OCCUPANCY_FULL_THRESHOLD votos netos para marcarla llena) y la tarjeta decia
+ * "Va con espacio" — o sea, le contestaba lo contrario a la persona que acababa
+ * de reportar que iba llena.
+ *
+ * El umbral no era el problema; el problema era que la interfaz nunca contaba
+ * que existia. Ahora se dice: "1 de 3 reportes para marcarla llena". Es la misma
+ * regla de siempre — declarar en que estado esta el dato en vez de presentar una
+ * conclusion que no se sostiene.
+ *
+ * "Va con espacio" queda reservado para cuando es un hecho: lo dijo el chofer, o
+ * hay al menos tantos reportes como el umbral y aun asi el veredicto no es FULL,
+ * lo que solo puede ocurrir si hay votos de "ya no va llena" restando.
+ */
 export function formatOccupancy(occupancy) {
   if (!occupancy || occupancy.status === "UNKNOWN") return null
 
-  const porElChofer = occupancy.source === "DRIVER"
+  // El chofer ve el bus; los pasajeros votan desde afuera. Su veredicto vale
+  // solo y no se acompana de ningun conteo.
+  if (occupancy.source === "DRIVER") {
+    return occupancy.status === "FULL"
+      ? { label: "Va llena", detail: "Según el chofer", tone: "full" }
+      : { label: "Va con espacio", detail: "Según el chofer", tone: "ok" }
+  }
+
   if (occupancy.status === "FULL") {
     return {
       label: "Va llena",
-      detail: porElChofer ? "Segun el chofer" : `${occupancy.reportCount} pasajeros lo reportaron`,
+      detail: `${occupancy.reportCount} ${occupancy.reportCount === 1 ? "pasajero lo reportó" : "pasajeros lo reportaron"}`,
       tone: "full",
+    }
+  }
+
+  if (occupancy.reportCount < OCCUPANCY_FULL_THRESHOLD) {
+    return {
+      label: "Sin veredicto todavía",
+      detail: `${occupancy.reportCount} de ${OCCUPANCY_FULL_THRESHOLD} reportes para marcarla llena`,
+      tone: "pending",
     }
   }
 
   return {
     label: "Va con espacio",
-    detail: porElChofer ? "Segun el chofer" : "Segun los pasajeros",
+    detail: "Según los pasajeros",
     tone: "ok",
   }
 }

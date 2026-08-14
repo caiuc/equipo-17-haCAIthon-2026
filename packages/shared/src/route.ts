@@ -40,6 +40,29 @@ export const routeSummarySchema = z.object({
 export const routeDetailSchema = routeSummarySchema.extend({
   stops: routeStopSchema.array(),
   schedules: scheduleSchema.array(),
+  /**
+   * Trazado real del recorrido por las calles, en el "encoded polyline" de
+   * Google. Va solo en el detalle y no en el resumen: son ~1-6 KB por recorrido
+   * y la lista de busqueda no dibuja ningun camino.
+   *
+   * Para dibujarlo en el mapa, la polilinea codificada se le pasa directo a la
+   * API de Google, que ya sabe leer este formato:
+   *
+   *   new google.maps.Polyline({
+   *     path: google.maps.geometry.encoding.decodePath(route.pathPolyline),
+   *     map,
+   *   })
+   *
+   * (`decodePath` vive en la libreria `geometry`, hay que pedirla al cargar el
+   * script de Maps.)
+   *
+   * **null significa que este recorrido no tiene trazado calculado**, no que no
+   * tenga camino: el dibujo debe caer entonces a unir `stops` en linea recta.
+   * Nunca asumir que viene: el trazado lo calcula un script aparte
+   * (`apps/api/tools/trazados`) contra una API que cobra por llamada, y hay
+   * recorridos que quedan sin el a proposito.
+   */
+  pathPolyline: z.string().nullable(),
 });
 
 // --- Entradas de la empresa ---

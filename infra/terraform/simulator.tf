@@ -59,6 +59,13 @@ resource "aws_ecs_task_definition" "simulator" {
     # exec directo de esto: no hay riesgo de que el simulador toque el esquema.
     command = ["node", "dist/simulate.js"]
 
+    # El simulador atiende SIGTERM para cerrar los turnos abiertos antes de irse
+    # (si no, quedan micros fantasma marcadas IN_TRANSIT que hay que limpiar a
+    # mano). Los 30 s por defecto de ECS alcanzan, pero se declara explicito
+    # porque el cierre masivo de 24 turnos se espera hasta 15 s: dejarlo implicito
+    # invita a que alguien lo baje sin ver la relacion.
+    stopTimeout = 30
+
     environment = concat([
       # Al ALB por dentro de la VPC, no a CloudFront: es un salto menos, no gasta
       # transferencia de CDN y no pasa por el rate limit del borde. El simulador es
@@ -81,47 +88,58 @@ resource "aws_ecs_task_definition" "simulator" {
   }])
 }
 
-# AVISO - RATE LIMIT DEL LOGIN: esto se puede romper solo, y hay que saberlo antes.
+# RATE LIMIT DEL LOGIN: esto ROMPIO la demo una vez. Queda documentado para que no
+# se vuelva a armar sin querer.
 #
-# El simulador descubre empresas y choferes haciendo logins contra /api/auth/login:
-# unos 18 por arranque (un login por micro, mas los 401 que marcan el tope de choferes
-# de cada empresa; los 401 tambien consumen cupo). Desde ECS todos salen por UNA SOLA
-# IP -- la del NAT Gateway si enable_nat_gateway = true, o la IP publica de la tarea si
-# es false -- asi que el API los ve como un unico cliente.
+# El simulador hace un login por micro contra /api/auth/login, y desde ECS todos
+# salen por UNA SOLA IP -- la del NAT Gateway si enable_nat_gateway = true, o la IP
+# publica de la tarea si es false -- asi que el API los ve como un unico cliente.
+# El limite es `isProduction ? 30 : 300` por ventana de 15 minutos y por IP, y ese
+# 300 NO aplica aqui: la tarea del API corre con NODE_ENV=production (lo pone
+# ecs.tf), asi que el cupo real contra el despliegue son 30.
 #
-# El limite en apps/api/src/routes/auth.routes.ts es `isProduction ? 30 : 300` por
-# ventana de 15 minutos y por IP. OJO: ese 300 NO aplica aqui. La tarea del API corre
-# con NODE_ENV=production (lo pone ecs.tf), asi que contra el despliegue el cupo real
-# son 30. Cuentas: 18 caben una vez; dos arranques dentro de la misma ventana son 36 y
-# el segundo se come 429s a mitad del descubrimiento.
+# Lo que paso con BUSES=40: 40 logins contra un cupo de 30 no caben NUNCA. El login
+# 31 recibia 429, el simulador se moria, ECS relanzaba la tarea, y la tarea nueva
+# gastaba otros 30 logins de una ventana ya agotada. Bucle de reinicio cada ~50 s y
+# mapa sin micros por mas de media hora. Evidencia en el log: "El API corto los
+# logins (429). Espera 881 s..." seguido de otro arranque 50 s despues.
 #
-# Lo peligroso es que ECS reintenta la tarea que muere. Si el simulador falla al
-# arrancar (por 429, o porque falta dist/simulate.js), ECS la relanza, cada relanzada
-# gasta mas cupo, y la ventana no se libera nunca: la demo queda muerta 15 minutos
-# justo cuando alguien la esta mirando. Es exactamente el escenario "lo enciendo dos
-# minutos antes de presentar y no levanta".
+# Arreglado en tres lugares, y los tres hacen falta:
+#   1. apps/api/src/routes/auth.routes.ts: el limitador del LOGIN cuenta solo los
+#      intentos FALLIDOS (skipSuccessfulRequests). La fuerza bruta se hace de
+#      fallos, asi que la proteccion queda igual de firme -- de hecho mejor, porque
+#      antes cualquiera podia agotar el cupo de una IP con 30 intentos y dejar
+#      afuera a los usuarios legitimos. Los logins correctos del simulador ya no
+#      cuentan. NO se subio el numero a ciegas: eso si habria aflojado el freno.
+#   2. tools/simulator/index.ts: un 429 ya no mata el proceso. Se lee
+#      RateLimit-Reset, se espera y se reintenta, y las micros que ya entraron
+#      arrancan mientras tanto. Morir era la peor respuesta posible.
+#   3. Aca abajo: min 0 / max 100 en el despliegue, para no tener dos simuladores
+#      peleandose los mismos choferes.
 #
-# Mitigaciones posibles, en orden de menos a mas invasivo. NINGUNA se implementa aqui:
-# las tres primeras tocan codigo de apps/api, que hoy es de otra persona.
-#   1. Operacional, gratis y suficiente para la demo: encender el servicio con
-#      desired_count 1 al menos 20 minutos antes, mirar el log, y NO reiniciarlo. Si
-#      hubo un 429, esperar la ventana completa antes de volver a intentar.
-#   2. En el simulador (tools/simulator.ts): reintentar el login con backoff al
-#      recibir 429 en vez de morir, y cortar el descubrimiento al primer 401 por
-#      empresa. Baja el pico y evita el bucle de reinicios.
-#   3. En el API (routes/auth.routes.ts): `skip` del authLimiter cuando la peticion
-#      trae una cabecera con un secreto compartido de demo, inyectado aqui como
-#      variable de entorno. Es la unica que elimina el problema de raiz sin aflojar
-#      el limite para los usuarios reales -- que es lo que NO hay que hacer: ese
-#      limite protege las credenciales de los choferes de verdad.
-#   4. Infra: enable_nat_gateway = true fija la IP de salida, lo que permitiria una
-#      lista blanca por IP. Cuesta ~USD 32/mes y no arregla el conteo por si solo.
+# Si aun asi hiciera falta mas margen: enable_nat_gateway = true fija la IP de
+# salida y permitiria una lista blanca por IP. Cuesta ~USD 32/mes.
 resource "aws_ecs_service" "simulator" {
   name            = "${local.name}-simulator"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.simulator.arn
   desired_count   = var.simulator_desired_count
   launch_type     = "FARGATE"
+
+  # DOS TAREAS A LA VEZ ES UN BUG, no una ventaja de disponibilidad.
+  #
+  # Con los valores por defecto (min 100 / max 200) un redespliegue levanta la
+  # tarea nueva ANTES de bajar la vieja. Las dos usan los MISMOS choferes de
+  # demo: la nueva adopta los turnos abiertos de la vieja y despues los cierra al
+  # dar la vuelta, y la vieja se queda pingueando un tripId ya COMPLETED. Eso es
+  # exactamente el 409 "El turno ya no esta en transito" que se vio repetido
+  # cientos de veces en el log, con las micros congelandose en el mapa.
+  #
+  # min 0 / max 100 fuerza el orden contrario: primero para la vieja (que cierra
+  # sus turnos con SIGTERM), despues arranca la nueva. Se pierden unos segundos
+  # de movimiento en cada despliegue, que es un precio ridiculo al lado de esto.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
 
   network_configuration {
     # Igual que el API: sin NAT Gateway la tarea necesita IP publica para bajar la

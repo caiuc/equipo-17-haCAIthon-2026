@@ -76,6 +76,25 @@ export const searchRoutes = (q) =>
 export const getRoute = (routeId) => request(`/api/routes/${routeId}`)
 
 /**
+ * Fichas publicas de las empresas, cacheadas en memoria por toda la sesion.
+ *
+ * Son ocho filas que cambian una vez al mes: pedirlas en cada seleccion de micro
+ * seria gastar datos moviles del pasajero para releer lo mismo. Se guarda la
+ * promesa y no el resultado, asi dos selecciones seguidas mientras la primera
+ * sigue en vuelo comparten una sola peticion. Un fallo NO se cachea: se borra
+ * para que la siguiente seleccion vuelva a intentar.
+ */
+let companiesRequest = null
+
+export const getCompanies = () => {
+  companiesRequest ??= request("/api/companies").catch((err) => {
+    companiesRequest = null
+    throw err
+  })
+  return companiesRequest
+}
+
+/**
  * Estado en vivo de un recorrido. Consultar cada LIVE_POLL_INTERVAL_MS.
  * `stopId` es opcional: sin el, distanceMeters viene null en todas las micros.
  */
@@ -135,4 +154,29 @@ export const company = {
   updateDriver: (id, input) =>
     request(`/api/company/drivers/${id}`, { method: "PATCH", body: input, auth: true }),
   liveTrips: () => request("/api/company/trips/live", { auth: true }),
+}
+
+// --- App del chofer ---
+
+export const driver = {
+  listRoutes: () => request("/api/driver/routes", { auth: true }),
+  /** Turno abierto del chofer, o null. Es lo que permite retomar tras recargar. */
+  activeTrip: () => request("/api/driver/trips/active", { auth: true }),
+  /** 409 si ya hay un turno abierto; el turno viene en `details.trip` para adoptarlo. */
+  startTrip: (routeId) =>
+    request("/api/driver/trips/start", { method: "POST", body: { routeId }, auth: true }),
+  endTrip: (tripId) => request(`/api/driver/trips/${tripId}/end`, { method: "POST", auth: true }),
+  /**
+   * Una posicion suelta o el lote acumulado sin senal. La rama de `positions`
+   * es la que hace que un corte de senal no pierda el recorrido: se manda todo
+   * junto cuando la senal vuelve.
+   */
+  sendPositions: (tripId, positions) =>
+    request(`/api/driver/trips/${tripId}/positions`, {
+      method: "POST",
+      body: positions.length === 1 ? positions[0] : { positions },
+      auth: true,
+    }),
+  reportOccupancy: (tripId, full) =>
+    request(`/api/driver/trips/${tripId}/occupancy`, { method: "POST", body: { full }, auth: true }),
 }

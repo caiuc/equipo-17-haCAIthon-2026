@@ -17,6 +17,11 @@ import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../../src/lib/password.js';
 import { BANNER } from './banner.js';
 import { COMPANIES, DEMO_PASSWORD, PASAJERO, SUPERADMIN } from './data/index.js';
+// Se importa del archivo y NO del barril data/index.js a proposito: son 263 KB de
+// polilineas, y el simulador importa ese barril para sacar COMPANIES. Colgarlas
+// del barril le cargaria a cada micro simulada un cuarto de mega que no usa (el
+// simulador recibe el trazado del API, no del seed).
+import { trazadoDe } from './data/trazados.js';
 import type { CompanySeed } from './types.js';
 
 const prisma = new PrismaClient();
@@ -84,11 +89,19 @@ const sembrarEmpresa = async (seed: CompanySeed, passwordHash: string): Promise<
   }
 
   for (const routeSeed of seed.routes) {
+    // El trazado por calles viaja con el seed porque es la unica via para que
+    // llegue a produccion: su base es un RDS privado y tools/trazados no la
+    // alcanza, pero el seed si corre alla (docker-entrypoint.sh -> dist/seed.js).
+    const trazado = trazadoDe(seed.slug, routeSeed.code);
     const datos = {
       name: routeSeed.name,
       originName: routeSeed.originName,
       destinationName: routeSeed.destinationName,
       active: true,
+      // Se omite la clave cuando no hay trazado, en vez de mandar null: asi un
+      // recorrido al que se le calculo el trazado en esta base pero que aun no
+      // esta en el archivo generado no lo pierde en la proxima siembra.
+      ...(trazado ? { pathPolyline: trazado } : {}),
     };
     const route = await prisma.route.upsert({
       where: { companyId_code: { companyId: company.id, code: routeSeed.code } },
@@ -179,6 +192,15 @@ const main = async (): Promise<void> => {
   console.log(`Tarifas:    ${suma(rutas((ruta) => ruta.fares.length))}`);
   console.log(`Choferes:   ${suma((empresa) => empresa.drivers.length)}`);
   console.log(`Buses:      ${suma((empresa) => empresa.buses.length)}`);
+  // Si esto no dice 63/63 en el log del despliegue, las micros de ese entorno
+  // estan cruzando en linea recta y conviene enterarse aca y no mirando el mapa.
+  const trazados = suma(
+    (empresa) =>
+      empresa.routes.filter((ruta) => trazadoDe(empresa.slug, ruta.code) !== null).length,
+  );
+  console.log(
+    `Trazados:   ${trazados}/${suma((empresa) => empresa.routes.length)} recorridos por calles`,
+  );
   console.log(
     `Sin tarifa publicada: ${sinTarifa.length} empresa(s) -> ${sinTarifa.map((e) => e.slug).join(', ') || '-'}`,
   );

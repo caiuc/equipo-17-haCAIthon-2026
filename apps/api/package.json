@@ -15,7 +15,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed/index.ts",
-    "simulate": "tsx tools/simulator/index.ts"
+    "simulate": "tsx tools/simulator/index.ts",
+    "trazados": "tsx tools/trazados/index.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed/index.ts"

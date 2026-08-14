@@ -1,9 +1,28 @@
-import { useRef, useState } from "react"
-import { BusFront, ChevronUp } from "lucide-react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { BusFront, ChevronUp, Navigation } from "lucide-react"
+import { CompanyCard } from "@/components/passenger/CompanyCard"
 import { MicroCard } from "@/components/passenger/MicroCard"
-import { outOfServiceStyle } from "@/lib/freshness"
+import { formatDistance, outOfServiceStyle } from "@/lib/freshness"
+import { usePrefersReducedMotion } from "@/lib/motion"
 
-const DRAG_THRESHOLD_PX = 40
+/**
+ * Las tres posiciones de reposo, como fraccion del alto visible.
+ *
+ * Tres y no dos porque con dos no hay forma de mirar el mapa y la lista a la
+ * vez: o la hoja tapa el mapa o esconde la lista. "Asomada" deja ver la cabecera
+ * y una micro y media — lo justo para que se note que hay mas abajo.
+ */
+const DETENTS = { peek: 0.3, mid: 0.55, full: 0.92 }
+const ORDER = ["peek", "mid", "full"]
+
+/** Cuanto se proyecta el gesto hacia adelante segun su velocidad, en ms. */
+const FLICK_PROJECTION_MS = 140
+/** Desde el cuerpo, un arrastre solo se reconoce despues de estos pixeles. */
+const DRAG_START_PX = 8
+/** Bajo esto el gesto fue un toque y lo resuelve el `click` del asa. */
+const TAP_SLOP_PX = 6
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
 function StopPicker({ stops, selectedStopId, onSelectStop }) {
   if (!stops.length) return null
@@ -40,6 +59,36 @@ function StopPicker({ stops, selectedStopId, onSelectStop }) {
   )
 }
 
+/**
+ * Atajo al paradero mas cercano. Conecta la ubicacion con lo unico que la app
+ * responde de verdad: con 61 paraderos en el selector, encontrar el propio a
+ * mano es justo la friccion que sobra para alguien apurado en la calle.
+ */
+function NearestStopHint({ nearest, selectedStopId, onSelectStop }) {
+  if (!nearest || nearest.stop.id === selectedStopId) return null
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectStop?.(nearest.stop.id)}
+      className="mb-3 flex w-full items-center gap-2.5 rounded-2xl border border-[var(--line)] bg-[var(--mist)] px-3.5 py-2.5 text-left"
+    >
+      <Navigation className="h-4 w-4 shrink-0 text-[#1a73e8]" strokeWidth={1.75} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium text-[var(--ink)]">
+          Paradero más cercano a ti: {nearest.stop.name}
+        </span>
+        <span className="block text-[12px] text-[var(--ink-soft)]">
+          A {formatDistance(nearest.distanceMeters)} de donde estás
+        </span>
+      </span>
+      <span className="shrink-0 rounded-full bg-[var(--ink)] px-3 py-1 text-[12px] font-medium text-white">
+        Usar
+      </span>
+    </button>
+  )
+}
+
 function OutOfServiceState({ scoped }) {
   const style = outOfServiceStyle()
 
@@ -69,61 +118,185 @@ export function RideSheet({
   selectedBusId,
   onSelectBus,
   onReportOccupancy,
+  myVotes = {},
   outOfService,
   elapsedMs = 0,
   truncated = false,
+  company = null,
+  companyLoading = false,
+  companyFares = [],
+  nearestStop = null,
 }) {
-  const [collapsed, setCollapsed] = useState(false)
-  const dragStartY = useRef(null)
+  const reducedMotion = usePrefersReducedMotion()
+  const sheetRef = useRef(null)
+  const scrollRef = useRef(null)
+  const gesture = useRef(null)
   // El navegador dispara `click` despues de un arrastre sobre el mismo boton:
-  // sin esta marca el gesto colapsaba la hoja y el click la volvia a abrir.
+  // sin esta marca el gesto movia la hoja y el click la volvia a mover.
   const dragged = useRef(false)
+
+  const [viewportH, setViewportH] = useState(() => window.innerHeight)
+  const [detent, setDetent] = useState("mid")
+  const [dragOffset, setDragOffset] = useState(null)
 
   const sinMicros = outOfService || buses.length === 0
 
-  function handlePointerDown(e) {
-    dragStartY.current = e.clientY
-    dragged.current = false
-    // Con captura el `pointerup` llega aunque el dedo termine fuera del boton.
-    e.currentTarget.setPointerCapture?.(e.pointerId)
+  // El alto se mide del contenedor real y no de `window`: en el movil la barra
+  // del navegador entra y sale, y `100svh` y `window.innerHeight` no coinciden.
+  useLayoutEffect(() => {
+    const parent = sheetRef.current?.parentElement
+    if (!parent) return
+
+    const update = () => setViewportH(parent.clientHeight)
+    update()
+
+    const observer = new ResizeObserver(update)
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [])
+
+  const fullHeight = viewportH * DETENTS.full
+  const offsets = useMemo(
+    () => ({
+      full: 0,
+      mid: viewportH * (DETENTS.full - DETENTS.mid),
+      peek: viewportH * (DETENTS.full - DETENTS.peek),
+    }),
+    [viewportH],
+  )
+
+  const offset = dragOffset ?? offsets[detent]
+  const dragging = dragOffset != null
+
+  const nearestDetent = useCallback(
+    (value) =>
+      ORDER.reduce((best, name) =>
+        Math.abs(offsets[name] - value) < Math.abs(offsets[best] - value) ? name : best,
+      ),
+    [offsets],
+  )
+
+  // Elegir una micro en el mapa tiene que dejarla a la vista: si la hoja quedo
+  // asomada, el detalle que se acaba de pedir estaria bajo el borde inferior.
+  useEffect(() => {
+    if (selectedBusId) setDetent((current) => (current === "peek" ? "mid" : current))
+  }, [selectedBusId])
+
+  // Una vez que el gesto es un arrastre de la hoja, el scroll nativo de la lista
+  // tiene que dejar de competir. `touchmove` no puede ser pasivo para poder
+  // cancelarlo, y por eso se registra a mano y no como prop de React.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const block = (event) => {
+      if (gesture.current?.active) event.preventDefault()
+    }
+
+    el.addEventListener("touchmove", block, { passive: false })
+    return () => el.removeEventListener("touchmove", block)
+  }, [])
+
+  function handlePointerDown(event, fromHandle) {
+    if (event.pointerType === "mouse" && event.button !== 0) return
+
+    gesture.current = {
+      id: event.pointerId,
+      startY: event.clientY,
+      startOffset: offsets[detent],
+      offset: offsets[detent],
+      lastY: event.clientY,
+      lastT: event.timeStamp,
+      prevY: event.clientY,
+      prevT: event.timeStamp,
+      // Desde el asa el arrastre manda de inmediato. Desde el cuerpo hay que
+      // ganarselo, o arrastrar para leer la lista cerraria la hoja.
+      active: fromHandle,
+      moved: false,
+    }
+    // Con captura, el `pointerup` llega aunque el dedo termine fuera del asa.
+    event.currentTarget.setPointerCapture?.(event.pointerId)
   }
 
-  function handlePointerUp(e) {
-    const startY = dragStartY.current
-    dragStartY.current = null
-    if (startY == null) return
+  function handlePointerMove(event) {
+    const state = gesture.current
+    if (!state || state.id !== event.pointerId) return
 
-    const delta = e.clientY - startY
-    if (Math.abs(delta) < DRAG_THRESHOLD_PX) return // fue un toque: lo resuelve el click
+    if (!state.active) {
+      const delta = event.clientY - state.startY
+      // Solo hacia abajo y solo con la lista arriba del todo: en cualquier otro
+      // caso el dedo esta haciendo scroll y no moviendo la hoja.
+      if (delta <= DRAG_START_PX || (scrollRef.current?.scrollTop ?? 0) > 0) return
+      state.active = true
+      // Se reancla aca para que la hoja no salte los pixeles del umbral.
+      state.startY = event.clientY
+    }
 
-    dragged.current = true
-    setCollapsed(delta > 0)
+    state.prevY = state.lastY
+    state.prevT = state.lastT
+    state.lastY = event.clientY
+    state.lastT = event.timeStamp
+
+    const delta = event.clientY - state.startY
+    if (Math.abs(delta) > TAP_SLOP_PX) state.moved = true
+
+    state.offset = clamp(state.startOffset + delta, offsets.full, offsets.peek)
+    setDragOffset(state.offset)
   }
 
-  function handleClick() {
+  function handlePointerUp(event) {
+    const state = gesture.current
+    if (!state || state.id !== event.pointerId) return
+    gesture.current = null
+    setDragOffset(null)
+
+    if (!state.active) return
+
+    dragged.current = state.moved
+
+    // La velocidad decide junto con la posicion: un movimiento corto pero rapido
+    // hacia abajo tiene que cerrar aunque no haya recorrido media distancia, que
+    // es como se siente natural un "flick".
+    const elapsed = Math.max(1, state.lastT - state.prevT)
+    const velocity = (state.lastY - state.prevY) / elapsed
+    setDetent(nearestDetent(state.offset + velocity * FLICK_PROJECTION_MS))
+  }
+
+  // El asa sigue siendo un boton: cicla las posiciones. Es el camino con teclado
+  // y con lector de pantalla, donde no hay gesto que valga.
+  function handleHandleClick() {
     if (dragged.current) {
       dragged.current = false
       return
     }
-    setCollapsed((c) => !c)
+    setDetent((current) => ORDER[(ORDER.indexOf(current) + 1) % ORDER.length])
   }
 
   return (
     <div
-      className={`pointer-events-auto absolute inset-x-0 bottom-0 z-10 overflow-y-auto rounded-t-3xl border-t border-[var(--line)] bg-white/95 backdrop-blur-xl shadow-[0_-8px_30px_rgba(0,0,0,0.08)] transition-[max-height] duration-300 ease-out ${
-        collapsed ? "max-h-[110px] overflow-hidden" : "max-h-[70vh]"
-      }`}
+      ref={sheetRef}
+      style={{
+        height: fullHeight,
+        transform: `translateY(${offset}px)`,
+        transition:
+          dragging || reducedMotion ? "none" : "transform 280ms cubic-bezier(0.32, 0.72, 0, 1)",
+      }}
+      className="pointer-events-auto absolute inset-x-0 bottom-0 z-10 flex flex-col rounded-t-3xl border-t border-[var(--line)] bg-white/95 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-xl"
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
       <button
         type="button"
-        onClick={handleClick}
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        className="sticky top-0 z-10 flex w-full flex-col items-center gap-1.5 bg-white/95 pt-2.5 pb-1.5 backdrop-blur-xl touch-none"
-        aria-label={collapsed ? "Mostrar lista de micros" : "Ver mapa completo"}
+        onClick={handleHandleClick}
+        onPointerDown={(event) => handlePointerDown(event, true)}
+        // `touch-action: none` va SOLO aca. En el contenedor con scroll mataria
+        // el scroll de la lista, que es la trampa clasica de este gesto.
+        className="flex w-full shrink-0 touch-none flex-col items-center gap-1.5 rounded-t-3xl bg-transparent pt-2.5 pb-1.5"
+        aria-label={`Hoja de micros: ${detent === "full" ? "completa" : detent === "mid" ? "a media altura" : "asomada"}. Arrástrala o púlsala para cambiar de altura.`}
       >
         <div className="h-1 w-9 rounded-full bg-[var(--line)]" />
-        {collapsed && (
+        {detent === "peek" && (
           <span className="flex items-center gap-1 text-[11px] text-[var(--ink-soft)]">
             <ChevronUp className="h-3 w-3" />
             {sinMicros
@@ -133,7 +306,11 @@ export function RideSheet({
         )}
       </button>
 
-      <div className="px-4 pb-6">
+      <div
+        ref={scrollRef}
+        onPointerDown={(event) => handlePointerDown(event, false)}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8"
+      >
         <div className="px-1 pb-3">
           {route ? (
             <>
@@ -157,6 +334,25 @@ export function RideSheet({
           )}
         </div>
 
+        <NearestStopHint
+          nearest={nearestStop}
+          selectedStopId={selectedStopId}
+          onSelectStop={onSelectStop}
+        />
+
+        {/* La ficha de la empresa aparece cuando hay recorrido y ninguna micro
+            que tocar: es justo entonces cuando su telefono es la respuesta util.
+            Con micros en ruta, el detalle completo vive en el modal de la micro
+            y esta tarjeta no compite con la lista. */}
+        {route && sinMicros && (
+          <CompanyCard
+            company={company}
+            fares={companyFares}
+            loading={companyLoading}
+            reason="Opera este recorrido"
+          />
+        )}
+
         <StopPicker stops={stops} selectedStopId={selectedStopId} onSelectStop={onSelectStop} />
 
         {sinMicros ? (
@@ -178,6 +374,7 @@ export function RideSheet({
                 selected={bus.tripId === selectedBusId}
                 onSelect={onSelectBus}
                 onReportOccupancy={onReportOccupancy}
+                myVote={myVotes[bus.tripId] ?? null}
                 elapsedMs={elapsedMs}
               />
             ))}

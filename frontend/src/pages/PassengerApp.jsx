@@ -1,13 +1,28 @@
-import { useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ChevronLeft, Loader2, Search, X } from "lucide-react"
 import { MapView } from "@/components/passenger/MapView"
 import { RideSheet } from "@/components/passenger/RideSheet"
+import { CompanyFilter } from "@/components/search/CompanyFilter"
+import { LocateButton } from "@/components/passenger/LocateButton"
+import { MicroDetailSheet } from "@/components/passenger/MicroDetailSheet"
+import { useCompanies } from "@/hooks/useCompanies"
+import { useCompany } from "@/hooks/useCompany"
 import { useElapsedSince } from "@/hooks/useElapsedSince"
 import { useLiveBuses } from "@/hooks/useLiveBuses"
 import { useLiveRoute } from "@/hooks/useLiveRoute"
+import { useRouteDetail } from "@/hooks/useRouteDetail"
 import { useRouteSearch } from "@/hooks/useRouteSearch"
+import { useUserLocation } from "@/hooks/useUserLocation"
 import { getRoute, reportOccupancy } from "@/lib/api"
+import { getCompanyFilter, setCompanyFilter } from "@/lib/companyFilter"
+import { nearestStop } from "@/lib/geo"
+import { getVotes, saveVote } from "@/lib/occupancyVotes"
+
+// Identidad estable para el caso "sin recorrido elegido": un `[]` nuevo en cada
+// render invalidaria los useMemo del mapa y redibujaria el trazado sin parar.
+const NO_STOPS = []
+const NO_BUSES = []
 
 export default function PassengerApp() {
   const [query, setQuery] = useState("")
@@ -18,7 +33,19 @@ export default function PassengerApp() {
   const [selectedStopId, setSelectedStopId] = useState(null)
   const [selectedBusId, setSelectedBusId] = useState(null)
   const [reportError, setReportError] = useState(null)
+  // Ocupacion recalculada que devuelve el POST del reporte. Se muestra al
+  // instante y manda hasta que un poll traiga una version mas nueva: sin esto la
+  // tarjeta seguia con el dato viejo cinco segundos y el toque parecia perdido.
+  const [occupancyOverrides, setOccupancyOverrides] = useState({})
+  const [myVotes, setMyVotes] = useState(getVotes)
+  // Contador y no booleano: cada toque del boton vuelve a centrar, aunque la
+  // camara ya haya estado ahi.
+  const [recenterToken, setRecenterToken] = useState(0)
+  // Se inicializa leyendo localStorage una sola vez (forma perezosa del useState):
+  // en cada render seria un acceso sincrono al storage por frame.
+  const [companyIds, setCompanyIds] = useState(getCompanyFilter)
 
+  const { companies } = useCompanies()
   const { routes, loading: searching, error: searchError } = useRouteSearch(query)
   const {
     live,
@@ -38,9 +65,128 @@ export default function PassengerApp() {
     refresh: refreshMap,
   } = useLiveBuses({ enabled: !route })
 
-  const stops = route?.stops ?? []
-  const buses = route ? (live?.buses ?? []) : mapBuses
-  const outOfService = route ? (live?.outOfService ?? true) : mapBuses.length === 0
+  const stops = route?.stops ?? NO_STOPS
+  // Igual que NO_STOPS: identidad estable, o el `[]` nuevo de cada render haria
+  // recalcular el filtro y el conteo por empresa en cada frame.
+  const busesSinFiltrar = useMemo(
+    () => (route ? (live?.buses ?? NO_BUSES) : mapBuses),
+    [route, live, mapBuses],
+  )
+
+  // Cuantas micros tiene cada empresa en ruta AHORA, antes de filtrar: es lo que
+  // hace que el chip pueda decir "0" en vez de dejar filtrar a ciegas.
+  const countByCompany = useMemo(() => {
+    const cuenta = new Map()
+    for (const bus of busesSinFiltrar) {
+      cuenta.set(bus.company.id, (cuenta.get(bus.company.id) ?? 0) + 1)
+    }
+    return cuenta
+  }, [busesSinFiltrar])
+
+  /*
+   * El filtro se aplica en el CLIENTE, no pidiendole al servidor.
+   *
+   * `/api/live/buses` acepta un solo `companyId`, asi que una seleccion multiple
+   * obligaria a N peticiones por tick de polling y a mezclar respuestas de
+   * instantes distintos — justo lo que el principio rector prohibe, porque cada
+   * micro viaja con su propia frescura y unirlas las mezclaria.
+   *
+   * Ademas `useLiveBuses` usa `companyId` como `resetKey`: mandarlo al servidor
+   * vaciaria la lista en cada toque del chip y el mapa parpadearia. Con 24 micros
+   * el payload completo es de unos pocos KB y filtrar es un `includes`.
+   */
+  const buses = useMemo(() => {
+    if (companyIds.length === 0) return busesSinFiltrar
+    return busesSinFiltrar.filter((bus) => companyIds.includes(bus.company.id))
+  }, [busesSinFiltrar, companyIds])
+
+  // El buscador se filtra con el mismo criterio: `routeSummary` ya trae `company`,
+  // asi que no hace falta ninguna peticion extra.
+  const routesFiltradas = useMemo(() => {
+    if (companyIds.length === 0) return routes
+    return routes.filter((item) => companyIds.includes(item.company.id))
+  }, [routes, companyIds])
+
+  const empresasFiltradas = useMemo(
+    () => companies.filter((company) => companyIds.includes(company.id)),
+    [companies, companyIds],
+  )
+
+  // El filtro dejo cero micros pero SI habia micros en ruta: es un caso distinto
+  // de "no hay nada andando" y hay que decirlo con esas palabras.
+  const vacioPorFiltro = companyIds.length > 0 && buses.length === 0
+
+  const outOfService = route
+    ? (live?.outOfService ?? true)
+    : buses.length === 0
+
+  const toggleCompany = useCallback((companyId) => {
+    setCompanyIds((previas) => {
+      const siguientes = previas.includes(companyId)
+        ? previas.filter((id) => id !== companyId)
+        : [...previas, companyId]
+      setCompanyFilter(siguientes)
+      return siguientes
+    })
+  }, [])
+
+  const clearCompanies = useCallback(() => {
+    setCompanyIds([])
+    setCompanyFilter([])
+  }, [])
+
+  /*
+   * Lo que respondio el POST del reporte pisa a lo que trajo el ultimo poll,
+   * pero solo mientras sea mas nuevo. Las dos versiones son del mismo servidor y
+   * traen `updatedAt` ISO, asi que comparar cadenas alcanza y el estado local se
+   * descarta solo en cuanto el polling se pone al dia: nada queda pegado.
+   */
+  const busesConReporte = useMemo(() => {
+    if (Object.keys(occupancyOverrides).length === 0) return buses
+
+    return buses.map((bus) => {
+      const mio = occupancyOverrides[bus.tripId]
+      if (!mio) return bus
+      const delServidor = bus.occupancy?.updatedAt
+      if (delServidor && delServidor >= (mio.updatedAt ?? "")) return bus
+      return { ...bus, occupancy: mio }
+    })
+  }, [buses, occupancyOverrides])
+
+  const selectedBus = busesConReporte.find((bus) => bus.tripId === selectedBusId) ?? null
+
+  const { status: locationStatus, position: userPosition, request: requestLocation } =
+    useUserLocation()
+
+  // Con la ubicacion a mano, el paradero mas cercano se calcula aca mismo: es
+  // una cuenta sobre datos que ya estan en memoria y no justifica una consulta.
+  const nearest = useMemo(() => nearestStop(userPosition, stops), [userPosition, stops])
+
+  // El detalle del recorrido de la micro abierta. Con recorrido ya elegido se
+  // reusa el que hay; en el mapa general se pide (y se cachea) el de la micro.
+  const detailRouteId = selectedBus?.routeId ?? null
+  const { route: detailRouteFetched, loading: detailRouteLoading } = useRouteDetail(
+    detailRouteId && detailRouteId !== route?.id ? detailRouteId : null,
+  )
+  const detailRoute = detailRouteId === route?.id ? route : detailRouteFetched
+  const selectedStop = stops.find((stop) => stop.id === selectedStopId) ?? null
+
+  // La ficha sigue a la micro elegida, y si no hay ninguna elegida, a la empresa
+  // del recorrido. Ese segundo caso es el que mas importa: cuando no hay ninguna
+  // micro transmitiendo no queda micro que seleccionar, y el telefono de la
+  // empresa pasa a ser la unica respuesta util que podemos dar.
+  const companyId = selectedBus?.company?.id ?? route?.company?.id ?? null
+  const { company, loading: companyLoading } = useCompany(companyId)
+
+  const companyFares = useMemo(() => {
+    if (route) return route.fares ?? []
+    // En el mapa sin recorrido elegido la micro solo trae la tarifa de adulto.
+    // null es "no publicada" y NO se convierte en una fila: formatFare ya sabe
+    // decir "Tarifa por confirmar" cuando no hay dato.
+    return [{ passengerType: "ADULT", amountClp: selectedBus?.fareAdultClp ?? null }].filter(
+      (fare) => fare.amountClp != null,
+    )
+  }, [route, selectedBus])
 
   // Envejece lo mostrado entre consultas: si el polling se corta, las micros se
   // degradan solas a "Señal intermitente" y "Sin señal" en vez de quedarse
@@ -69,11 +215,21 @@ export default function PassengerApp() {
 
   async function handleReportOccupancy(tripId, full) {
     setReportError(null)
+    // El voto se marca antes de la respuesta: es lo que la persona acaba de
+    // decir, y la interfaz no puede quedarse muda esperando a la red rural.
+    setMyVotes(saveVote(tripId, full))
+
     try {
-      await reportOccupancy(tripId, full)
+      const payload = await reportOccupancy(tripId, full)
+      // El endpoint devuelve la ocupacion ya recalculada. Descartarla obligaba a
+      // esperar el siguiente poll para ver cualquier efecto del propio voto.
+      if (payload?.occupancy) {
+        setOccupancyOverrides((previas) => ({ ...previas, [tripId]: payload.occupancy }))
+      }
     } catch (err) {
       setReportError(err)
     }
+
     // Se refresca igual: si el reporte entro, la ocupacion que muestra el
     // servidor es la unica version que vale.
     if (route) refresh()
@@ -85,10 +241,19 @@ export default function PassengerApp() {
       <MapView
         buses={buses}
         stops={stops}
+        pathPolyline={route?.pathPolyline ?? null}
         selectedBusId={selectedBusId}
         onSelectBus={setSelectedBusId}
+        selectedStopId={selectedStopId}
+        onSelectStop={setSelectedStopId}
+        routeColor={route?.company?.color}
+        userPosition={userPosition}
+        recenterToken={recenterToken}
         elapsedMs={elapsedMs}
-        fitKey={route?.id ?? "map"}
+        // El filtro entra en la clave para que la camara vuelva a encuadrar sobre
+        // las micros que quedaron: filtrar y que el mapa siga mirando a otro lado
+        // no se lee como un filtro, se lee como que no paso nada.
+        fitKey={`${route?.id ?? "map"}|${companyIds.join(",")}`}
       />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-2 p-4">
@@ -125,6 +290,19 @@ export default function PassengerApp() {
           </div>
         </div>
 
+        {/* Los chips van bajo la barra y SIEMPRE visibles, tambien con la hoja
+            de resultados cerrada: si el filtro esta puesto tiene que verse, o el
+            mapa parece vacio sin explicacion. */}
+        <div className="ml-12">
+          <CompanyFilter
+            companies={companies}
+            selectedIds={companyIds}
+            onToggle={toggleCompany}
+            onClear={clearCompanies}
+            countByCompany={countByCompany}
+          />
+        </div>
+
         {searchOpen && (
           <div className="pointer-events-auto ml-12 max-h-[55vh] overflow-y-auto rounded-2xl border border-[var(--line)] bg-white shadow-lg">
             {searching && (
@@ -140,14 +318,16 @@ export default function PassengerApp() {
               </p>
             )}
 
-            {!searching && !searchError && routes.length === 0 && (
+            {!searching && !searchError && routesFiltradas.length === 0 && (
               <p className="px-4 py-3 text-[13px] text-[var(--ink-soft)]">
-                No encontramos recorridos con “{query}”.
+                {routes.length > 0
+                  ? `Ninguna empresa filtrada tiene recorridos con “${query}”.`
+                  : `No encontramos recorridos con “${query}”.`}
               </p>
             )}
 
             {!searching &&
-              routes.map((item) => (
+              routesFiltradas.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -185,7 +365,7 @@ export default function PassengerApp() {
               </p>
             )}
 
-            {!route && !routeLoading && !routeError && (
+            {!route && !routeLoading && !routeError && !vacioPorFiltro && (
               <button
                 type="button"
                 onClick={() => setSearchOpen(true)}
@@ -193,6 +373,33 @@ export default function PassengerApp() {
               >
                 Busca tu recorrido para ver las micros en ruta.
               </button>
+            )}
+
+            {/* Una lista vacia sin texto no responde "¿viene o no viene?". Si el
+                filtro es el que dejo el mapa en cero, se dice con el nombre de la
+                empresa y se ofrece el camino de vuelta. */}
+            {vacioPorFiltro && (
+              <div className="rounded-2xl bg-white px-4 py-2.5 shadow-md">
+                <p className="text-[13px] font-semibold text-[var(--ink)]">
+                  {empresasFiltradas.length === 1
+                    ? `Ninguna micro de ${empresasFiltradas[0]?.name} está en ruta ahora.`
+                    : `Ninguna micro de las ${empresasFiltradas.length} empresas filtradas está en ruta ahora.`}
+                </p>
+                <p className="mt-0.5 text-[12px] text-[var(--ink-soft)]">
+                  {busesSinFiltrar.length > 0
+                    ? `Hay ${busesSinFiltrar.length} ${
+                        busesSinFiltrar.length === 1 ? "micro" : "micros"
+                      } de otras empresas en ruta.`
+                    : "Tampoco hay micros de otras empresas en ruta."}
+                </p>
+                <button
+                  type="button"
+                  onClick={clearCompanies}
+                  className="mt-1.5 text-[13px] font-medium text-[var(--accent-deep)]"
+                >
+                  Quitar el filtro
+                </button>
+              </div>
             )}
 
             {/* Responde directo el "¿viene o no viene?" sin abrir la hoja. */}
@@ -227,8 +434,17 @@ export default function PassengerApp() {
         )}
       </div>
 
+      <LocateButton
+        status={locationStatus}
+        accuracy={userPosition?.accuracy ?? null}
+        onRequest={() => {
+          requestLocation()
+          setRecenterToken((token) => token + 1)
+        }}
+      />
+
       <RideSheet
-        buses={buses}
+        buses={busesConReporte}
         route={route}
         stops={stops}
         selectedStopId={selectedStopId}
@@ -238,7 +454,31 @@ export default function PassengerApp() {
         onReportOccupancy={handleReportOccupancy}
         outOfService={outOfService}
         elapsedMs={elapsedMs}
-        truncated={truncated}
+        // El aviso de "hay mas micros" lo calcula el servidor sobre la lista sin
+        // filtrar: con el filtro puesto seria una advertencia sobre micros que el
+        // pasajero ya decidio no mirar.
+        truncated={truncated && companyIds.length === 0}
+        company={company}
+        companyLoading={companyLoading}
+        companyFares={companyFares}
+        myVotes={myVotes}
+        nearestStop={nearest}
+      />
+
+      {/* El detalle de la micro. `bus` viene del mismo polling que el mapa, asi
+          que la frescura, la distancia y la ocupacion se siguen actualizando con
+          el modal abierto: congelarlas seria mostrar un dato viejo como fresco. */}
+      <MicroDetailSheet
+        bus={selectedBus}
+        route={detailRoute}
+        routeLoading={detailRouteLoading}
+        company={company}
+        companyLoading={companyLoading}
+        stop={selectedStop}
+        elapsedMs={elapsedMs}
+        myVote={selectedBus ? (myVotes[selectedBus.tripId] ?? null) : null}
+        onReportOccupancy={handleReportOccupancy}
+        onClose={() => setSelectedBusId(null)}
       />
     </div>
   )

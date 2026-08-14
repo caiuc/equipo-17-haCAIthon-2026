@@ -11,11 +11,23 @@ export const AYUDA = `Simulador de micros (multiempresa).
 
   BUSES=18 pnpm --filter @equipo17/api simulate -- --seed=17
 
+CUENTAS RESERVADAS PARA PERSONAS
+  El seed siembra chofer1..chofer6 por empresa. El simulador usa SOLO chofer1..4.
+  chofer5@<empresa>.cl y chofer6@<empresa>.cl no los toca nunca: quedan libres
+  para probar la app del chofer (/chofer) desde un telefono de verdad.
+
+  Importa porque el simulador adopta el turno activo del chofer con el que entra
+  y lo cierra al llegar al terminal. Si usara las 6 cuentas, un reinicio del
+  servicio le cortaria la transmision a la persona que este manejando un turno.
+
+  Tope de micros: 4 x cantidad de empresas (32 con las 8 del seed).
+
 Flags:
   --seed=N         Semilla del azar. Misma corrida en el ensayo y en la demo.
   --wait-for-api   Espera a que el API conteste antes de arrancar.
   --once           Termina el turno al llegar al terminal en vez de dar la vuelta.
-  --cleanup        Cierra los turnos que quedaron abiertos y sale.
+  --cleanup        Cierra los turnos abiertos de chofer1..4 y sale. Rescate manual;
+                   NO lo corre el servicio al arrancar. No toca turnos de personas.
   --drop-signal    Garantiza al menos una micro que enmudece (envejece en pantalla).
   --flaky          Garantiza al menos una micro con senal intermitente.
   --all-good       Todas transmiten siempre.

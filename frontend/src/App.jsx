@@ -9,6 +9,7 @@ import { FinalCta } from "@/components/landing/FinalCta"
 import { Footer } from "@/components/landing/Footer"
 import PassengerApp from "@/pages/PassengerApp"
 import CompanyApp from "@/pages/CompanyApp"
+import DriverApp from "@/pages/DriverApp"
 
 function Landing() {
   return (
@@ -36,6 +37,7 @@ function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/app" element={<PassengerApp />} />
       <Route path="/empresa" element={<CompanyApp />} />
+      <Route path="/chofer" element={<DriverApp />} />
     </Routes>
   )
 }

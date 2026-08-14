@@ -174,6 +174,11 @@ export const getRouteDetail = async (id: string): Promise<RouteDetail> => {
 
   return {
     ...toSummary(route, counts.get(route.id) ?? 0),
+    // Se pasa tal cual, sin decodificar: el cliente lo entiende nativo
+    // (google.maps.geometry.encoding.decodePath) y decodificarlo aca seria
+    // mandar el mismo camino en veinte veces mas bytes. null = sin trazado
+    // calculado; el mapa cae a unir los paraderos en recta.
+    pathPolyline: route.pathPolyline,
     stops: route.stops.map((stop) => ({
       id: stop.id,
       name: stop.name,

@@ -1475,7 +1475,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/RouteSummary'
         - type: object
-          required: [stops, schedules]
+          required: [stops, schedules, pathPolyline]
           properties:
             stops:
               type: array
@@ -1484,6 +1484,30 @@ components:
             schedules:
               type: array
               items: { $ref: '#/components/schemas/Schedule' }
+            pathPolyline:
+              type: string
+              nullable: true
+              description: |
+                Trazado real del recorrido por las calles, en el **encoded polyline**
+                de Google (el mismo formato que devuelve la Routes API). Va solo en el
+                detalle y no en `RouteSummary`: son ~1-6 KB por recorrido y la lista de
+                busqueda no dibuja ningun camino.
+
+                Se dibuja pasandoselo directo a la API de Maps, que ya sabe leerlo:
+
+                ```js
+                new google.maps.Polyline({
+                  path: google.maps.geometry.encoding.decodePath(route.pathPolyline),
+                  map,
+                })
+                ```
+
+                **`null` significa que este recorrido no tiene trazado calculado**, no
+                que no tenga camino. El cliente debe caer entonces a unir `stops` en
+                linea recta. Nunca asumir que viene: lo calcula un script aparte
+                (`apps/api/tools/trazados`) contra una API que cobra por llamada, y hay
+                recorridos que quedan sin el a proposito.
+              examples: ['btahEbtzeL?e@Dm@HuA@_@Ba@']
 
     RouteStop:
       type: object

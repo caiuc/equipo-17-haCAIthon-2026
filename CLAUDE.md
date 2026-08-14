@@ -60,7 +60,16 @@ simulate`. Con `-- --drop-signal` una micro deja de transmitir a los ~40 s para
 mostrar en vivo la degradacion En vivo → Senal intermitente → Sin senal.
 
 Usuarios del seed (clave `demo1234`): `superadmin@demo.cl`, `admin@bupesa.cl`,
-`chofer1..3@bupesa.cl`, `pasajero@demo.cl`.
+`chofer1..6@<empresa>.cl`, `pasajero@demo.cl`.
+
+**Choferes reservados para personas: `chofer5` y `chofer6` de cada empresa.** El
+simulador usa unicamente `chofer1..4` y esas dos cuentas no las toca nunca. La
+razon no es de estilo: el simulador adopta el turno activo del chofer con el que
+entra y lo cierra al llegar al terminal, asi que si compartiera cuenta con una
+persona que esta usando `/chofer` desde el telefono, un reinicio del servicio le
+cortaria la transmision sin aviso. Para probar la app del chofer, usar
+`chofer5@<empresa>.cl` o `chofer6@<empresa>.cl`. El tope de micros del simulador
+queda en 4 x empresas (32 con las 8 del seed).
 
 ## Superficie del API por rol
 

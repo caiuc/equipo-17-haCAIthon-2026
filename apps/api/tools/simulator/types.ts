@@ -12,7 +12,33 @@ export type RutaResumen = {
   destinationName: string;
 };
 
-export type RutaDetalle = RutaResumen & { stops: Paradero[] };
+export type RutaDetalle = RutaResumen & {
+  stops: Paradero[];
+  /**
+   * Trazado real por las calles (encoded polyline de Google), o null si este
+   * recorrido no lo tiene calculado. Nunca se asume que viene: sin el, la micro
+   * cae a interpolar entre paraderos.
+   */
+  pathPolyline: string | null;
+};
+
+/**
+ * Por donde avanza realmente la micro.
+ *
+ * Con `pathPolyline` calculado, `puntos` son los vertices del camino y solo
+ * algunos son paradero; sin el, `puntos` son los paraderos y todos lo son. Los
+ * largos vienen precalculados porque un recorrido por calles tiene miles de
+ * vertices y recorrerlos en cada tick de cada micro seria tirar CPU a la basura.
+ */
+export type Trazado = {
+  puntos: Punto[];
+  /** Largo en metros del tramo puntos[i] -> puntos[i+1]. Nunca 0. */
+  largos: number[];
+  /** Metros desde el FIN del tramo i hasta el proximo paradero. 0 = termina en uno. */
+  alParadero: number[];
+  /** true si sale de una polilinea real. Solo para el resumen de arranque. */
+  porCalles: boolean;
+};
 
 /**
  * Lo que el simulador necesita del seed. Se declara estructuralmente y no se
@@ -65,6 +91,8 @@ export type Micro = {
   email: string;
   token: string;
   ruta: RutaDetalle;
+  /** Geometria por la que avanza: el camino real, o los paraderos en recta. */
+  trazado: Trazado;
   /** Recorridos de la empresa: de ahi sale el sentido contrario al dar la vuelta. */
   rutasDeEmpresa: RutaResumen[];
   tripId: string | null;

@@ -176,8 +176,18 @@ model Route {
   originName      String
   destinationName String
   active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+
+  /// Trazado real por las calles, en encoded polyline de Google (~1-6 KB por
+  /// recorrido). Lo calcula `tools/trazados` contra la Routes API; no lo siembra
+  /// el seed porque cada llamada cuesta dinero.
+  ///
+  /// Opcional a proposito: es un dato de CONVENIENCIA, no uno del que dependa
+  /// responder "¿viene o no viene?". Sin el, la micro simulada y el mapa caen a
+  /// la interpolacion recta entre paraderos, que se ve peor pero funciona.
+  pathPolyline String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   stops     RouteStop[]

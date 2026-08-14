@@ -3,9 +3,14 @@
  *
  * Todo aca es puro (entra estado, sale estado): el reloj y el azar llegan como
  * parametros. Asi el movimiento se puede testear sin levantar nada.
+ *
+ * La micro no avanza sobre los paraderos sino sobre un TRAZADO (ver abajo): con
+ * `Route.pathPolyline` calculado son los vertices del camino real, y sin el son
+ * los paraderos, como siempre. La cinematica es la misma en los dos casos.
  */
 import { haversineMeters } from '../../src/lib/geo.js';
-import type { EstadoMovimiento, Punto } from './types.js';
+import { decodePolyline } from '../../src/lib/polyline.js';
+import type { EstadoMovimiento, Punto, Trazado } from './types.js';
 
 /**
  * La velocidad sale de la GEOMETRIA del recorrido, no de una columna nueva en la
@@ -103,31 +108,127 @@ export const interpolar = (a: Punto, b: Punto, t: number): Punto => ({
   lng: a.lng + (b.lng - a.lng) * t,
 });
 
-const puntoEn = (stops: Punto[], tramo: number, avance: number): Punto => {
-  const a = stops[tramo];
-  const b = stops[tramo + 1];
+const puntoEn = (puntos: Punto[], tramo: number, avance: number): Punto => {
+  const a = puntos[tramo];
+  const b = puntos[tramo + 1];
   if (!a) return { lat: 0, lng: 0 };
   if (!b) return a;
   return interpolar(a, b, Math.min(1, Math.max(0, avance)));
 };
 
+// --- Trazado: por donde avanza realmente la micro ---
+
+/**
+ * Distancia desde el final de cada tramo hasta el proximo paradero.
+ *
+ * Es lo que permite frenar bien sobre un camino real: entre dos paraderos hay
+ * decenas de vertices de la polilinea, y frenar al llegar a cada uno dejaria la
+ * micro avanzando al paso de un peaton toda la ruta. Se recorre al reves porque
+ * cada tramo se apoya en el resultado del siguiente.
+ */
+const distanciasAlParadero = (largos: number[], esParadero: boolean[]): number[] => {
+  const alParadero = new Array<number>(largos.length).fill(0);
+
+  for (let tramo = largos.length - 2; tramo >= 0; tramo -= 1) {
+    // El tramo termina en el punto tramo+1: si ese es paradero, no falta nada.
+    alParadero[tramo] = esParadero[tramo + 1]
+      ? 0
+      : (largos[tramo + 1] ?? 0) + (alParadero[tramo + 1] ?? 0);
+  }
+
+  return alParadero;
+};
+
+const armar = (puntos: Punto[], esParadero: boolean[], porCalles: boolean): Trazado => {
+  const largos = largosDeTramos(puntos);
+  return { puntos, largos, alParadero: distanciasAlParadero(largos, esParadero), porCalles };
+};
+
+/** El comportamiento de siempre: la micro va de paradero a paradero en recta. */
+export const trazadoDeParaderos = (stops: Punto[]): Trazado =>
+  armar(
+    stops,
+    stops.map(() => true),
+    false,
+  );
+
+/**
+ * A que vertice del camino corresponde cada paradero.
+ *
+ * La polilinea que devuelve la Routes API pasa CERCA de cada paradero pero no
+ * por su coordenada exacta (las nuestras son aproximadas, geocodificadas a la
+ * localidad), asi que hay que engancharlos al vertice mas cercano. La busqueda
+ * avanza y no vuelve atras: un recorrido que pasa dos veces por la misma esquina
+ * asignaria el segundo paradero al vertice de la primera pasada y la micro
+ * frenaria en el lugar equivocado.
+ */
+const engancharParaderos = (camino: Punto[], stops: Punto[]): boolean[] => {
+  const esParadero = camino.map(() => false);
+  const ultimo = camino.length - 1;
+  // Origen y destino no se buscan: la polilinea nace y muere en ellos.
+  esParadero[0] = true;
+  esParadero[ultimo] = true;
+
+  let desde = 1;
+  for (const stop of stops.slice(1, -1)) {
+    let mejor = desde;
+    let mejorDistancia = Infinity;
+
+    for (let i = desde; i < ultimo; i += 1) {
+      const vertice = camino[i];
+      if (!vertice) continue;
+      const distancia = haversineMeters(stop, vertice);
+      if (distancia < mejorDistancia) {
+        mejorDistancia = distancia;
+        mejor = i;
+      }
+    }
+
+    esParadero[mejor] = true;
+    // Estrictamente creciente: dos paraderos no pueden caer en el mismo vertice
+    // o el tramo entre ellos tendria largo cero.
+    desde = Math.min(mejor + 1, ultimo);
+  }
+
+  return esParadero;
+};
+
+/**
+ * El trazado de este recorrido.
+ *
+ * Con `pathPolyline` calculado la micro circula por las calles; sin el, cae a la
+ * interpolacion entre paraderos. La caida NO es un caso de error: hay recorridos
+ * a los que el script de trazados no les encontro camino a proposito, y ninguno
+ * de ellos puede quedarse fuera del mapa por eso.
+ */
+export const construirTrazado = (stops: Punto[], pathPolyline: string | null): Trazado => {
+  if (!pathPolyline) return trazadoDeParaderos(stops);
+
+  const camino = decodePolyline(pathPolyline);
+  // Un trazado mas corto que los propios paraderos no puede ser el camino: o
+  // vino cortado, o quedo de una version vieja del recorrido.
+  if (camino.length < 2 || camino.length < stops.length) return trazadoDeParaderos(stops);
+
+  return armar(camino, engancharParaderos(camino, stops), true);
+};
+
 export const estadoInicial = (
-  stops: Punto[],
+  trazado: Trazado,
   ubicacion: { tramo: number; avance: number },
 ): EstadoMovimiento => {
-  const a = stops[ubicacion.tramo];
-  const b = stops[ubicacion.tramo + 1];
+  const a = trazado.puntos[ubicacion.tramo];
+  const b = trazado.puntos[ubicacion.tramo + 1];
   return {
     tramo: ubicacion.tramo,
     avance: ubicacion.avance,
     heading: a && b ? rumboEntre(a, b) : 0,
     detenidoHasta: 0,
-    punto: puntoEn(stops, ubicacion.tramo, ubicacion.avance),
+    punto: puntoEn(trazado.puntos, ubicacion.tramo, ubicacion.avance),
   };
 };
 
 export type EntradaAvance = {
-  stops: Punto[];
+  trazado: Trazado;
   estado: EstadoMovimiento;
   /** Crucero de esta micro, con su variacion fija ya aplicada. */
   velocidadKmh: number;
@@ -158,8 +259,9 @@ export type SalidaAvance = {
  * parada en el paradero no es una micro sin senal.
  */
 export const avanzar = (entrada: EntradaAvance): SalidaAvance => {
-  const { stops, estado, deltaMs, ahora } = entrada;
-  const ultimoTramo = stops.length - 2;
+  const { trazado, estado, deltaMs, ahora } = entrada;
+  const { puntos, largos, alParadero } = trazado;
+  const ultimoTramo = puntos.length - 2;
   if (ultimoTramo < 0) return { estado, speedKmh: 0, fin: true };
 
   if (estado.detenidoHasta > ahora) {
@@ -167,7 +269,6 @@ export const avanzar = (entrada: EntradaAvance): SalidaAvance => {
     return { estado, speedKmh: 0, fin: false };
   }
 
-  const largos = largosDeTramos(stops);
   const velocidadBase = entrada.velocidadKmh * (1 + (entrada.ruido * 2 - 1) * RUIDO_MAXIMO);
 
   let tramo = Math.min(estado.tramo, ultimoTramo);
@@ -180,10 +281,15 @@ export const avanzar = (entrada: EntradaAvance): SalidaAvance => {
   while (restanteMs > 0) {
     const largo = largos[tramo] ?? 1;
     const restanteM = largo * (1 - avance);
+    // Se frena contra el PARADERO, no contra el proximo vertice del camino: sobre
+    // una polilinea real hay decenas de vertices entre paradero y paradero, y
+    // frenar en cada uno dejaria la micro al paso de un peaton todo el recorrido.
+    const alProximoParadero = restanteM + (alParadero[tramo] ?? 0);
 
-    // Frenado proporcional a lo que falta para el paradero.
     const factor =
-      restanteM < RADIO_FRENADO_M ? Math.max(FRENADO_MINIMO, restanteM / RADIO_FRENADO_M) : 1;
+      alProximoParadero < RADIO_FRENADO_M
+        ? Math.max(FRENADO_MINIMO, alProximoParadero / RADIO_FRENADO_M)
+        : 1;
     speedKmh = velocidadBase * factor;
 
     const metros = (speedKmh / 3.6) * (restanteMs / 1000);
@@ -193,23 +299,27 @@ export const avanzar = (entrada: EntradaAvance): SalidaAvance => {
       break;
     }
 
-    // Cruza el paradero: se descuenta el tiempo que costo llegar hasta el.
+    // Cruza el punto: se descuenta el tiempo que costo llegar hasta el.
     restanteMs -= (restanteM / (speedKmh / 3.6)) * 1000;
     if (tramo >= ultimoTramo) {
       avance = 1;
       fin = true;
       break;
     }
+
+    // Solo se detiene si lo que cruzo es un paradero. Un vertice del camino es
+    // una curva, no una parada.
+    const eraParadero = (alParadero[tramo] ?? 0) === 0;
     tramo += 1;
     avance = 0;
-    if (entrada.sorteoParada < PROBABILIDAD_PARADA) {
+    if (eraParadero && entrada.sorteoParada < PROBABILIDAD_PARADA) {
       detenidoHasta = ahora + entrada.duracionParadaMs;
       speedKmh = 0;
       break;
     }
   }
 
-  const punto = puntoEn(stops, tramo, avance);
+  const punto = puntoEn(puntos, tramo, avance);
   const movio =
     Math.abs(punto.lat - estado.punto.lat) > MOVIMIENTO_MINIMO_GRADOS ||
     Math.abs(punto.lng - estado.punto.lng) > MOVIMIENTO_MINIMO_GRADOS;
