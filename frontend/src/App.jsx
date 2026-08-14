@@ -7,6 +7,7 @@ import { HowItWorks } from "@/components/landing/HowItWorks"
 import { TechNote } from "@/components/landing/TechNote"
 import { FinalCta } from "@/components/landing/FinalCta"
 import { Footer } from "@/components/landing/Footer"
+import DashboardPage from "@/pages/DashboardPage"
 import PassengerApp from "@/pages/PassengerApp"
 import CompanyApp from "@/pages/CompanyApp"
 
@@ -32,6 +33,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/app" element={<PassengerApp />} />
         <Route path="/empresa" element={<CompanyApp />} />
       </Routes>
