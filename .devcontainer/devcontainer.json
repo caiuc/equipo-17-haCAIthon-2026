@@ -1,0 +1,34 @@
+{
+  "name": "Miqui · HaCAithon 2026",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "forwardPorts": [
+    3000,
+    5173
+  ],
+  "portsAttributes": {
+    "3000": {
+      "label": "Servicio 3000",
+      "onAutoForward": "silent"
+    },
+    "5173": {
+      "label": "Aplicación",
+      "onAutoForward": "openPreview"
+    }
+  },
+  "postAttachCommand": {
+    "app": "bash -lc 'corepack enable && pnpm dev'"
+  },
+  "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "README.md"
+      ]
+    }
+  },
+  "postCreateCommand": "bash -lc 'sudo service postgresql start; sudo -u postgres psql -c \"ALTER USER postgres PASSWORD '\\''postgres'\\'';\"; sudo -u postgres createdb miqui || true; corepack enable && pnpm install && pnpm db:migrate || true'",
+  "features": {
+    "ghcr.io/itsmechlark/features/postgresql:1": {
+      "version": "16"
+    }
+  }
+}
